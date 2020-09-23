@@ -14,6 +14,8 @@ def klBern(x, y):
    return x * log(x / y) + (1 - x) * log((1 - x) / (1 - y))
 klBern_vect = np.vectorize(klBern)
 
+def log_plus(x):
+    return max(1, log(x))
 
 #: Different phases during the OSSB algorithm
 Phase = Enum('Phase', ['initialisation', 'exploitation', 'estimation', 'exploration'])
@@ -382,15 +384,19 @@ class OSSB_DEL(BasePolicy):
             self.old_mt = values_c_x_mt.copy()
         
         self.eta_solution = values_c_x_mt.copy()
-        values_c_x_mt[values_c_x_mt > log(self.t)] = log(self.t) # min{\eta_{n,i}, log(n)}
-        log_plus = max(1, log(self.t))
-        values_c_x_mt = (1 + 1/log(log_plus)) * values_c_x_mt
+        
+        eta_infArms = (np.where(values_c_x_mt==np.inf))[0]
+        for i in range(len(eta_infArms)):
+            values_c_x_mt[eta_infArms[i]] = (log(self.t))**2
+
+    
+        values_c_x_mt = (1 + 1/log_plus(log_plus(self.t))) * values_c_x_mt
         self.eta_compare = values_c_x_mt.copy()
 
         if 'L' in self._kwargs and self._kwargs['L'] == -1:
             self.LC_value = LCvalue
 
-        underSampledArms = np.where(self.pulls <= log(self.t)/log(log_plus))[0]
+        underSampledArms = np.where(self.pulls <= log(self.t)/log_plus(log_plus(self.t)))[0]
         if underSampledArms.size > 0:
             # under-sampled arm
             self.phase = Phase.estimation
@@ -428,7 +434,7 @@ class LipschitzOSSB_DEL(OSSB_DEL):
         kwargs.update({'L': L})
         super(LipschitzOSSB_DEL, self).__init__(nbArms, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="estimated", **kwargs)
 
-class LipschitzOSSB_DEL_true(OSSB):
+class LipschitzOSSB_DEL_true(OSSB_DEL):
     def __init__(self, nbArms, gamma=GAMMA, L=trueLC, **kwargs):
         kwargs.update({'L': L})
         super(LipschitzOSSB_DEL_true, self).__init__(nbArms, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="true", **kwargs)
