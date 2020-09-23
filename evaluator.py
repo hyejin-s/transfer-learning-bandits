@@ -975,6 +975,119 @@ class Evaluator(object):
       
         return fig
 
+    def plotConditionalExpectation_bisection(self, filepath, envId=0):
+        Q = defaultdict(list)
+        fig = plt.figure()
+        standard_value = 20
+        
+        colors =['tomato', 'deepskyblue']
+        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
+        for repeatId in range(self.repetitions):
+            for t in range(self.horizon):
+                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
+            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            if estimated_value < standard_value:
+                Q[0].append(cum_pullarm[repeatId])
+            else:
+                Q[1].append(cum_pullarm[repeatId])
+        
+        X = np.arange(self.envs[envId].nbArms)
+        Y = []
+        for i in range(len(Q.keys())):
+            meanY = np.array(list(Q.values())[i]).mean(axis=0)
+            Y.append(meanY)
+
+        plt.plot(X, Y[0], label='Lipschitz Constant<20', color=colors[0])
+        plt.plot(X, Y[1], label='Lipschitz Constant>20', color=colors[1])
+        legend()
+        plt.xlabel('Estimated Lipschitz Constant_bisection')
+        plt.ylabel('Ratio of suboptimal arms pulls')
+        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_bisection', dpi=300)   
+
+        return fig
+
+    def plotConditionalExpectation_bisection20(self, filepath, envId=0):
+        # top and bottom 30%
+
+        EL_repetition = defaultdict()
+        percent = 0.2
+
+        # last pull
+        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
+        for repeatId in range(self.repetitions):
+            # last pull
+            for t in range(self.horizon):
+                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
+            # save key: repeatId, value: Estimated Lipschitz Constant
+            EL_repetition[repeatId] = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+        align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
+
+        # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
+        
+        Q = defaultdict(list)
+        fig = plt.figure()
+        colors =['tomato', 'deepskyblue']
+        for i in range(int(self.repetitions*percent)):
+            Q[0].append(cum_pullarm[align_ELrepetition[i][0]]) # bottom30
+            Q[1].append(cum_pullarm[align_ELrepetition[self.repetitions-i-1][0]]) #top30
+        X = np.arange(self.envs[envId].nbArms)
+        Y = []
+        for i in range(len(Q.keys())):
+            meanY = np.array(list(Q.values())[i]).mean(axis=0)
+            Y.append(meanY)
+        
+        plt.plot(X, Y[0], label='Lipschitz Constant bottom 20%', color=colors[0])
+        plt.plot(X, Y[1], label='Lipschitz Constant top 20%', color=colors[1])
+        legend()
+        plt.xlabel('Estimated Lipschitz Constant_bisection')
+        plt.ylabel('Ratio of suboptimal arms pulls')
+        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_bisection20', dpi=300)   
+
+        return fig
+
+    def plotConditionalExpectation_bisection30(self, filepath, envId=0):
+        # top and bottom 30%
+
+        EL_repetition = defaultdict()
+        percent = 0.3
+
+        # last pull
+        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
+        for repeatId in range(self.repetitions):
+            # last pull
+            for t in range(self.horizon):
+                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
+            # save key: repeatId, value: Estimated Lipschitz Constant
+            EL_repetition[repeatId] = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+        align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
+
+        # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
+        
+        Q = defaultdict(list)
+        fig = plt.figure()
+        colors =['tomato', 'deepskyblue']
+        for i in range(int(self.repetitions*percent)):
+            Q[0].append(cum_pullarm[align_ELrepetition[i][0]]) # bottom30
+            Q[1].append(cum_pullarm[align_ELrepetition[self.repetitions-i-1][0]]) #top30
+        X = np.arange(self.envs[envId].nbArms)
+        Y = []
+        for i in range(len(Q.keys())):
+            meanY = np.array(list(Q.values())[i]).mean(axis=0)
+            Y.append(meanY)
+
+
+        plt.plot(X, Y[0], label='Lipschitz Constant bottom 30%', color=colors[0])
+        plt.plot(X, Y[1], label='Lipschitz Constant top 30%', color=colors[1])
+        legend()
+        plt.xlabel('Estimated Lipschitz Constant_bisection')
+        plt.ylabel('Ratio of suboptimal arms pulls')
+        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_bisection30', dpi=300)   
+
+        return fig   
+
 
     def plotConditionalExpectation_split(self, filepath, envId=0):
         Q = defaultdict(list)
