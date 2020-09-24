@@ -2,17 +2,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 
-# the number of arms
-K = int(input('the number of arms: '))
-embeddings_gene = list(np.linspace(0,1,K))
 
+class GenerativeModel(object):
+    def __init__(self, num_arm):
+        self.num_arm = num_arm
 
-arms_gene = np.zeros(K) # first arm is random value \in [0,1]
-arms_gene[0] = random.random()
-LC = 10 #### not define yet
-for i in range(K-1):
-    # max(a-L/(K-1), 0), min(a+L(K-1),1)
-    arms_gene[i+1] = random.uniform(max(arms_gene[i]-LC/(K-1),0),min(arms_gene[i]+LC/(K-1),1))
+    def gene_embedding(self):
+        embeddings = list(np.linspace(0,1,self.num_arm))
+        return embeddings
+
+    def gene_arms(self, LipC):
+        arms = np.zeros(self.num_arm)
+        arms[0] = random.random()
+        for i in range(self.num_arm-1):
+        # max(a-L/(K-1), 0), min(a+L(K-1),1)
+            arms[i+1] = random.uniform(max(arms[i]-LipC/(self.num_arm-1),0),min(arms[i]+LipC/(self.num_arm-1),1))
+        return arms
+
+"""
+a = GenerativeModel(5)
+print(a.gene_arms(10))
+print(a.gene_embedding())
+"""
 
 """
 plt.figure()
