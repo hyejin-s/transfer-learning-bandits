@@ -29,7 +29,7 @@ from SMPyBandits.Environment.MAB import MAB, MarkovianMAB, ChangingAtEachRepMAB,
 from Result import *
 from SMPyBandits.Environment.memory_consumption import getCurrentMemory, sizeof_fmt
 
-from OSSB_4 import *
+from OSSB import *
 from collections import defaultdict
 
 REPETITIONS = 1    #: Default nb of repetitions
@@ -138,7 +138,9 @@ class Evaluator(object):
         self.etaSolution = dict()
         self.etaCompare = dict()
         self.compareInfo = dict()
-        self.getallMeans = dict()
+        self.cumreward = dict()      
+        self.cumpull = dict()
+        self.arms_lastmean = dict()
         for envId in range(len(self.envs)):
             self.bestArmPulls[envId] = np.zeros((self.nbPolicies, self.horizon), dtype=np.int32)
             self.pulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms), dtype=np.int32)
@@ -152,7 +154,10 @@ class Evaluator(object):
             self.etaSolution[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
             self.etaCompare[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
             self.compareInfo[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, 3))
-            self.getallMeans[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon))
+            self.cumreward[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
+            self.cumpull[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
+
+
 
         print("Number of environments to try:", len(self.envs))
         # To speed up plotting
@@ -267,8 +272,27 @@ class Evaluator(object):
             self.etaSolution[envId][policyId][repeatId] = r.eta_Solution
             self.etaCompare[envId][policyId][repeatId] = r.eta_Compare
             self.compareInfo[envId][policyId][repeatId] = r.compare_Info
-            self.getallMeans[envId][policyId, repeatId, :, :] = env.get_allMeans(horizon=self.horizon)
-
+            for armId in range(env.nbArms):
+                for t in range(self.horizon):
+                    if r.choices[t] == armId:
+                        if t == 0:
+                            self.cumreward[envId][policyId, repeatId, armId, t] = r.rewards[t]
+                        else:
+                            self.cumreward[envId][policyId, repeatId, armId, t] = self.cumreward[envId][policyId, repeatId, armId, t-1] + r.rewards[t]
+                    else:
+                        if t != 0:
+                            self.cumreward[envId][policyId, repeatId, armId, t] = self.cumreward[envId][policyId, repeatId, armId, t-1]
+                        
+            for armId in range(env.nbArms):
+                for t in range(self.horizon):
+                    if r.choices[t] == armId:
+                        if t == 0: 
+                            self.cumpull[envId][policyId, repeatId, armId, t] = 1
+                        else:
+                            self.cumpull[envId][policyId, repeatId, armId, t] = self.cumpull[envId][policyId, repeatId, armId, t-1] + 1
+                    else:
+                        if t != 0:
+                            self.cumpull[envId][policyId, repeatId, armId, t] = self.cumpull[envId][policyId, repeatId, armId, t-1]
 
         # Start for all policies
         for policyId, policy in enumerate(self.policies):
@@ -571,6 +595,13 @@ class Evaluator(object):
                     plt.vlines(tau, ymin, ymax, linestyles='dotted', alpha=0.5)
         return plt.xlabel(*args, **kwargs)
 
+    def get_lastmeans(self, envId=0):
+        last_mean = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms))
+        for policyId in range(self.nbPolicies):
+            for repeatId in range(self.repetitions):
+                last_mean[policyId][repeatId] = self.cumreward[envId][policyId][repeatId, :, self.horizon-1]/self.cumpull[envId][policyId][repeatId, :, self.horizon-1]
+        return last_mean
+
 
     def plotRegrets(self, filepath, envId=0,
                     savefig=None, meanReward=False,
@@ -688,7 +719,10 @@ class Evaluator(object):
             else:
                 plt.ylabel(r"Regret $R_t = t \mu^* - \sum_{s=1}^{t}$ %s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{E}_{%d}[T_k(t)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$ (from actual rewards)" % (self.repetitions), ylabel2))
             plt.title("Cumulated regrets for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
-        plt.savefig(filepath+'/Regret', dpi=300)
+        if semilogy:
+            plt.savefig(filepath+'/Regret_semilogy', dpi=300)
+        else:
+            plt.savefig(filepath+'/Regret', dpi=300)
         return fig
 
     def plotBestArmPulls(self, envId=0, savefig=None):
@@ -781,6 +815,23 @@ class Evaluator(object):
         plt.title("Top and bottom(10%) number of times each arm pulls in ${}$ for different bandit algorithms, \naveraged ${}$ times: ${}$ arms".format(self.horizon, self.repetitions, self.envs[envId].nbArms))
         plt.savefig(filepath+'/num_ArmPulls_top_bottom10%mean', dpi=300)
         return fig
+    
+    def check_value(self, filepath, envId=0):
+        cum_pullarm = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms))
+        for i, policyId in enumerate(self.policies):
+            for repeatId in range(self.repetitions):
+                for t in range(self.horizon):
+                    cum_pullarm[i, repeatId] += self.allPulls_rep[envId][repeatId, i, :, t]
+
+        with open(filepath+"/check_value.txt", "w") as f:
+            for i, policy in enumerate(self.policies):
+                f.write("\nPolicy: " + str(policy) + "\n")
+                for repeatId in range(self.repetitions):
+                    f.write("\nRepeat: "+str(repeatId))
+                    f.write("\n")
+                    np.savetxt(f, cum_pullarm[i][repeatId], newline=", ", fmt='%i')
+                    f.write("\n")
+                    np.savetxt(f, self.lastPulls[envId][i,:,repeatId], newline=", ", fmt='%i')
 
     
     def plotArmPulls_percent(self, filepath, envId=0):
@@ -1214,7 +1265,7 @@ class Evaluator(object):
                     f.write("\n")
                     for t in range(self.horizon):
                         #if t % 1000 == 1:
-                        f.write("\nt={}, ".format(t+1))
+                        f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.etaSolution[envId][i][repeatId][t], newline=", ", fmt='%.4f')
         
         with open(filepath+"/LPcompare_solutions.txt", "w") as f:
@@ -1225,7 +1276,7 @@ class Evaluator(object):
                     f.write("\n")
                     for t in range(self.horizon):
                         #if t % 100 == 1:
-                        f.write("\nt={}, ".format(t+1))
+                        f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.etaCompare[envId][i][repeatId][t], newline=", ", fmt='%.4f')
 
         with open(filepath+"/LPcompare_solutions_last.txt", "w") as f:
@@ -1237,7 +1288,7 @@ class Evaluator(object):
                     np.savetxt(f, self.etaCompare[envId][i][repeatId][self.horizon-1], newline=", ", fmt='%.4f')
 
         with open(filepath+"/action_compareInfo.txt", "w") as f:
-            f.write("[estimation, exploration, exploitation]")
+            f.write("[estimation, exploitation, exploration]")
             for i, policy in enumerate(self.policies):
                 f.write("\nPolicy: " + str(policy) + "\n")
                 for repeatId in range(self.repetitions):
@@ -1245,26 +1296,11 @@ class Evaluator(object):
                     f.write("\n")
                     for t in range(self.horizon):
                         #if t % 100 == 1:
-                        f.write("\nt={}, ".format(t+1))
+                        f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.compareInfo[envId][i][repeatId][t], newline=", ", fmt='%.4f')
-            
-        # means
-        arms_cumreward = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
-        arms_cumpull = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
-        cum_value1 = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms))
-        cum_value2 = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms))
-        for i, policy in enumerate(self.policies):
-            for repeatId in range(self.repetitions):
-                for t in range(self.horizon):
-                    pull_idx = np.where(self.allPulls_rep[envId][repeatId, i, :, t] == 1)
-                    cum_value1[i][repeatId][pull_idx] += self.rewards_mean[i][envId][repeatId][t]
-                    arms_cumreward[i][repeatId][t] = cum_value1[i][repeatId]
-                    cum_value2[i][repeatId] += self.allPulls_rep[envId][repeatId, i, :, t]
-                    arms_cumpull[i][repeatId][t] = cum_value2[i][repeatId]
-
-        # self.allPulls_rep[envId] = np.zeros((self.repetitions, self.nbPolicies, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
-        # self.rewards_mean = np.zeros((self.nbPolicies, len(self.envs), self.repetitions, self.horizon))
-        with open(filepath+ "/arms_cumreward.txt", "w") as f:
+         
+        # define cumreward and cumpull
+        with open(filepath+ "/arms_cumreward_test.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
@@ -1272,9 +1308,9 @@ class Evaluator(object):
                     for t in range(self.horizon):
                         #if t % 100 == 1:
                         f.write("\nt= "+str(t)+", ")
-                        np.savetxt(f, arms_cumreward[i][repeatId][t].astype(int), fmt='%i', newline=", ")
+                        np.savetxt(f, self.cumreward[envId][i][repeatId, :, t].astype(int), fmt='%i', newline=", ")
         
-        with open(filepath+ "/arms_cumpull.txt", "w") as f:
+        with open(filepath+ "/arms_cumpull_test.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
@@ -1282,51 +1318,31 @@ class Evaluator(object):
                     for t in range(self.horizon):
                         #if t % 100 == 1:
                         f.write("\nt= "+str(t)+", ")
-                        np.savetxt(f, arms_cumpull[i][repeatId][t].astype(int), fmt='%i', newline=", ")
+                        np.savetxt(f, self.cumpull[envId][i][repeatId, :, t].astype(int), fmt='%i', newline=", ")
     
 
-        with open(filepath+ "/Empirical_means.txt", "w") as f:
+        with open(filepath+ "/Empirical_means_test.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
                     f.write('\nRepeat: '+str(repeatId))
                     for t in range(self.horizon):
-                        if 0 in arms_cumpull[i][repeatId][t]: # for divide                         
-                            arms_cumpull[i][repeatId][t] = np.where(arms_cumpull[i][repeatId][t]==0, 1, arms_cumpull[i][repeatId][t])
+                        if 0 in self.cumpull[envId][i][repeatId, :, t]: # for divide                         
+                            self.cumpull[envId][i][repeatId, :, t] = np.where(self.cumpull[envId][i][repeatId, :, t]==0, 1, self.cumpull[envId][i][repeatId, :, t])
                         #if t % 100 == 1:
                         f.write("\nt= "+str(t)+", ")
-                        mean_divide = arms_cumreward[i][repeatId][t]/arms_cumpull[i][repeatId][t]
+                        mean_divide = self.cumreward[envId][i][repeatId, :, t]/self.cumpull[envId][i][repeatId, :, t]
                         np.savetxt(f, mean_divide, fmt='%1.3f', newline=", ")
-    
-        with open(filepath+ "/Empirical_means_last.txt", "w") as f:
+
+        # def get_lastmeans()
+        with open(filepath+ "/Empirical_means_last_test.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
                     f.write('\nRepeat: '+str(repeatId))
                     f.write("\n")
-                    np.savetxt(f, arms_cumreward[i][repeatId][self.horizon-1]/arms_cumpull[i][repeatId][self.horizon-1].astype(int), fmt='%1.3f', newline=", ")
-
-        """
-        with open(filepath+ "/Empirical_means_last.txt", "w") as f:
-            for i, policy in enumerate(self.policies):
-                f.write('\nPolicy:{}'.format(policy.__cachedstr__))
-                f.write("\n")
-                for repeatId in range(self.repetitions):
-                    f.write("\nRepeat: "+str(repeatId))
-                    f.write("\n")
-                    np.savetxt(f, self.getallMeans[envId][i][repeatId])
-
-        with open(filepath+ "/Empirical_means.txt", "w") as f:
-            for i, policy in enumerate(self.policies):
-                f.write('\nPolicy:{}'.format(policy.__cachedstr__))
-                for repeatId in range(self.repetitions):
-                    f.write("\nRepeat: "+str(repeatId))
-                    f.write("\n")
-                    for t in range(self.horizon):
-                        f.write("\ntime:{}".format(t+1))
-                        f.write("\n")
-                        np.savetxt(f, self.getallMeans[envId][i][repeatId][:,t], newline=", ", fmt='%.4f')
-    """
+                    np.savetxt(f, self.get_lastmeans()[i][repeatId], fmt='%1.3f', newline=", ")
+    
 
     def plotHistogram(self, envId=0, horizon=10000, savefig=None, bins=50, alpha=0.9, density=None):
         """Plot a horizon=10000 draws of each arms."""
@@ -1643,6 +1659,7 @@ def delayed_play(env, policy, horizon,
         result.eta_Solution[t] = policy.eta_solution
         result.eta_Compare[t] = policy.eta_compare
         result.compare_Info[t] = policy.compare_info
+
 
         # 2. A random reward is drawn, from this arm at this time
         if allrewards is None:
