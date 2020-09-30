@@ -21,14 +21,13 @@ def log_plus(x):
 Phase = Enum('Phase', ['initialisation', 'exploitation', 'estimation', 'exploration'])
 
 #: Default value for the :math:`\gamma` parameter, 0.0 is a safe default.
-GAMMA = 0.001
+GAMMA = 0.01
 EPSILON = 1
 
 LCvalue = -1    # to print LC
 
 embeddings = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.998, 0.999, 1]
 arms = np.array([0.1, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.12, 0.001]) # need to check suboptimal(position)
-
 
 def estimate_Lipschitz_constant(thetas):
     L_values = []
@@ -40,7 +39,15 @@ def estimate_Lipschitz_constant(thetas):
 # for known Lipschitz Constant
 trueLC = estimate_Lipschitz_constant(arms) 
 
-def solve_optimization_problem__Lipschitz(thetas, L=-1):
+def get_confusing_bandit(k, L, thetas):
+    theta_max = np.amax(thetas)
+    # values : \lambda_i^k (arm k,i \in K^{-})
+    lambda_values = np.zeros_like(thetas)
+    for i, theta in enumerate(thetas):
+        lambda_values[i] = max(theta, theta_max-L*abs(embeddings[k]-embeddings[i]))
+    return lambda_values
+
+def solve_optimization_problem__Lipschitz(thetas, zeta, L=-1):
     if L==-1:
         tol = 1e-12
     else:
@@ -62,42 +69,26 @@ def solve_optimization_problem__Lipschitz(thetas, L=-1):
         L = estimate_Lipschitz_constant(thetas)
         LCvalue = L #to print LC
 
-    def get_confusing_bandit(k): 
-        # values : \lambda_i^k (arm k,i \in K^{-})
-        lambda_values = np.zeros_like(thetas)
-        for i, theta in enumerate(thetas):
-            lambda_values[i] = max(theta, theta_max-L*abs(embeddings[k]-embeddings[i]))
-        return lambda_values
-
     A_ub=np.zeros((sub_arms.size, sub_arms.size))
     for j, k in enumerate(sub_arms):
-        nu = get_confusing_bandit(k) # get /lambda^k
+        nu = get_confusing_bandit(k, L, thetas) # get /lambda^k
         for i, idx in enumerate(sub_arms):         # A_eq[j]=
             A_ub[j][i] = klBern(thetas[idx], nu[idx])
     A_ub = (-1)*A_ub
     b_ub = (-1)*np.ones_like(np.arange(sub_arms.size, dtype=int))
     delta = c[c!=0]
 
+    bounds_sub = np.zeros((sub_arms.size, 2))
+    for idx, i in enumerate(np.where(thetas != max(thetas))[0]):
+        bounds_sub[idx] = np.array((zeta[i], None))
+
     ## revised simplex
-    """
-    option = {}
+
     try:
-        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='revised simplex', options=option)
-    except Exception as e:
-        print(str(e))   
-        option1 = {'tol':1e-10}
-        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point', options=option1)
-        if res.success == True: 
-            print("PPAP success!")
-        else:
-            print("PPAP fail!") 
-            return np.full(thetas.size, -1)
-    """
-    try:
-        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='revised simplex', options=None)
+        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='revised simplex', bounds=bounds_sub)
     except Exception as e:
         print(str(e))
-        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point', options=None)
+        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point', bounds=bounds_sub)
         if res.success == True: 
             print("LinearProgramming Error_Exception: success")
         else:
@@ -122,14 +113,14 @@ def solve_optimization_problem__Lipschitz(thetas, L=-1):
         elif res.status == 4: # numerical difficult error
             # option_again = {'tol':1e-8, 'sym_pos':False, 'cholesky':False, 'lstsq':True}
             print("LinearProgramming Error: Numerical difficulties error")
-            res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point', options=None)
+            res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point', bounds=bounds_sub)
             # res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='revised simplex', options=option_again)
             if res.success == True: 
                 print("LinearProgramming Error4: success")
             else: 
                 print("LinearProgramming Error4: fail")
                 return np.full(thetas.size, -1)
-
+            
             result = np.zeros(thetas.size)
             for i, idx in enumerate(opt_arms):
                 result[idx] = np.inf
@@ -177,7 +168,6 @@ class BasePolicy(object):
         self.eta_solution = np.zeros(nbArms)
         self.eta_compare = np.zeros(nbArms)
         self.compare_info = np.zeros(3)
-
         self.LC_value = 0
 
     def __str__(self):
@@ -188,7 +178,7 @@ class BasePolicy(object):
 
     def startGame(self):
         """ Start the game (fill pulls and rewards with 0)."""
-        self.t = 0
+        self.t = 1
         self.pulls.fill(0)
         self.rewards.fill(0)
         self.old_mt = np.full(self.nbArms, 0)
@@ -291,18 +281,10 @@ class OSSB(BasePolicy):
             return chosen_arm
 
         else:
-            values = (1 + self.gamma) * values_c_x_mt * log(self.t) - self.pulls
-            # most under-explored arm
-            """
-            if np.all(values <= 0):
-                self.phase = Phase.exploitation
-                # current best arm
-                chosen_arm = np.random.choice(np.nonzero(means == np.max(means))[0])
-                return chosen_arm
-            """
             # exploration
             self.phase = Phase.exploration
             self.compare_info[2] += 1
+            values = (1 + self.gamma) * values_c_x_mt * log(self.t) - self.pulls
             max_value = np.max(values)
             # most under-explored arm
             chosen_arm = np.random.choice(np.nonzero(values == max_value)[0])
@@ -313,12 +295,10 @@ class LipschitzOSSB(OSSB):
         kwargs.update({'L': L})
         super(LipschitzOSSB, self).__init__(nbArms, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="estimated", **kwargs)
 
-
 class LipschitzOSSB_true(OSSB):
     def __init__(self, nbArms, gamma=GAMMA, L=trueLC, **kwargs):
         kwargs.update({'L': L})
         super(LipschitzOSSB_true, self).__init__(nbArms, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="true", **kwargs)
-
 
 
 # Algorithm1
@@ -367,64 +347,70 @@ class OSSB_DEL(BasePolicy):
     def choice(self):
         """ Applies the OSSB procedure, it's quite complicated so see the original paper."""
         means = (self.rewards / self.pulls)
-        # play each arm ones
-        if np.any(self.pulls < 1):
-            if 'L' in self._kwargs and self._kwargs['L'] == -1:
-                global LCvalue
-                self.LC_value = LCvalue
-            self.eta_solution = np.zeros(self.nbArms)
-            self.eta_compare = np.zeros(self.nbArms)
-            return np.random.choice(np.nonzero(self.pulls < 1)[0])
 
-        thistime_mt = self._solve_optimization_problem(means, **self._kwargs)
-        if np.all(thistime_mt == -1):
-            values_c_x_mt = self.old_mt
-        else:
-            values_c_x_mt = thistime_mt
-            self.old_mt = values_c_x_mt.copy()
-        
-        self.eta_solution = values_c_x_mt.copy()
-        
-        eta_infArms = (np.where(values_c_x_mt==np.inf))[0]
-        for i in range(len(eta_infArms)):
-            values_c_x_mt[eta_infArms[i]] = (log(self.t))**2
-
-    
-        values_c_x_mt = (1 + 1/log_plus(log_plus(self.t))) * values_c_x_mt
-        self.eta_compare = values_c_x_mt.copy()
+        count_undersample = 0
+        zeta = np.zeros(self.nbArms)
+        zeta_value = self.pulls/log_plus(self.t)
+        for i in range(self.nbArms):
+            if i in np.where(means == max(means))[0]:
+                zeta[i] = np.inf
+            else:
+                zeta[i] = zeta_value[i]
+                count_undersample += 1
 
         if 'L' in self._kwargs and self._kwargs['L'] == -1:
-            self.LC_value = LCvalue
+            global LCvalue
+            LCvalue = estimate_Lipschitz_constant(means)
+        elif 'L' in self._kwargs and self._kwargs['L'] == trueLC:
+            LCvalue = trueLC
+        self.LC_value = LCvalue
 
-        underSampledArms = np.where(self.pulls <= log(self.t)/log_plus(log_plus(self.t)))[0]
+        sum_cons = np.zeros(count_undersample)
+        for k in np.where(means != max(means))[0]:
+            nu_confus = get_confusing_bandit(k, LCvalue, means)
+            for i, idx in enumerate(np.where(means != max(means))[0]):
+                sum_cons[i] += klBern(means[idx], nu_confus[idx]) * (zeta[idx] / (1 + self.gamma))    
+        
+        ### start
+        underSampledArms = np.where(self.pulls <= log_plus(self.t)/log_plus(log_plus(self.t)))[0]
         if underSampledArms.size > 0:
-            # under-sampled arm
             self.phase = Phase.estimation
             self.compare_info[0] += 1
             chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[underSampledArms]))[0])
-            return chosen_arm
+            self.eta_solution = 1
+            return chosen_arm   
 
-        elif np.all(self.pulls >= values_c_x_mt * log(self.t)):
+        elif np.all(sum_cons >= 1):
             self.phase = Phase.exploitation
             self.compare_info[1] += 1
             bestvalue_arm = np.where(means == np.max(means))[0]
             chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[bestvalue_arm]))[0])
+            self.eta_solution = 2
             return chosen_arm
 
         else:
-            values = values_c_x_mt * log(self.t) - self.pulls
-            """
-            # most under-explored arm
-            if np.all(values <= 0):
-                self.phase = Phase.exploitation
-                # current best arm
-                chosen_arm = np.random.choice(np.nonzero(means == np.max(means))[0])
-                return chosen_arm
-            """
+            # for error
+            thistime_mt = self._solve_optimization_problem(means, zeta, **self._kwargs)
+            if np.all(thistime_mt == -1):
+                values_c_x_mt = self.old_mt
+            else:
+                values_c_x_mt = thistime_mt
+                self.oldmt = values_c_x_mt.copy()
+            self.eta_solution = values_c_x_mt.copy()
+   
+            values_c_x_mt2 = np.zeros(self.nbArms)
+            for i in range(self.nbArms):
+                if i in np.where(means != max(means))[0]:
+                    values_c_x_mt2[i] = (1 + self.gamma) * values_c_x_mt[i]
+                else:
+                    values_c_x_mt2[i] = log_plus(self.t)
+            self.eta_compare = values_c_x_mt2.copy()
+
             # exploration          
             self.phase = Phase.exploration
             self.compare_info[2] += 1
             # most under-explored arm
+            values = values_c_x_mt2 * log(self.t) - self.pulls
             chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
             return chosen_arm
 
