@@ -27,7 +27,7 @@ EPSILON = 1
 LCvalue = -1    # to print LC
 
 embeddings = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.998, 0.999, 1]
-arms = np.array([0.1, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.12, 0.001]) # need to check suboptimal(position)
+arms = np.array([0.1, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.2, 0.001]) # need to check suboptimal(position)
 
 def estimate_Lipschitz_constant(thetas):
     L_values = []
@@ -81,6 +81,7 @@ def solve_optimization_problem__Lipschitz(thetas, zeta, L=-1):
     bounds_sub = np.zeros((sub_arms.size, 2))
     for idx, i in enumerate(np.where(thetas != max(thetas))[0]):
         bounds_sub[idx] = (zeta[i], None)
+        #bounds_sub[idx] = (0, None)
 
     ## revised simplex
 
@@ -131,12 +132,13 @@ def solve_optimization_problem__Lipschitz(thetas, zeta, L=-1):
             print("LinearProgramming Error: Last fail")
             return np.full(thetas.size, -1)
 
-def solve_optimization_problem__classic(thetas):
+def solve_optimization_problem__classic(thetas, zeta):
     """ 
     Solve the optimization problem (2)-(3) as defined in the paper, for classical stochastic bandits.
 
     - No need to solve anything, as they give the solution for classical bandits.
     """
+    zeta = 0
     values = np.zeros_like(thetas)
     theta_max = np.max(thetas)
 
@@ -146,88 +148,6 @@ def solve_optimization_problem__classic(thetas):
         else:
             values[i] = np.inf
     return values
-
-def solve_optimization_problem__Lipschitz2(thetas, L=-1):
-    if L==-1:
-        tol = 1e-12
-    else:
-        tol = 1e-8
-
-    theta_max = np.amax(thetas)
-    c = theta_max - thetas  # c : (\theta^*-theta_k)_{k\in K}
-    
-    sub_arms = (np.nonzero(c))[0]
-    opt_arms = (np.where(c==0))[0]
-
-    if sub_arms.size==0:    # ex) arms' mean => all 0
-        global LCvalue
-        LCvalue = 0
-        return np.full(thetas.size, np.inf)
-
-    # for unknown Lipschitz Constant
-    if L==-1:
-        L = estimate_Lipschitz_constant(thetas)
-        LCvalue = L #to print LC
-
-    A_ub=np.zeros((sub_arms.size, sub_arms.size))
-    for j, k in enumerate(sub_arms):
-        nu = get_confusing_bandit(k, L, thetas) # get /lambda^k
-        for i, idx in enumerate(sub_arms):         # A_eq[j]=
-            A_ub[j][i] = klBern(thetas[idx], nu[idx])
-    A_ub = (-1)*A_ub
-    b_ub = (-1)*np.ones_like(np.arange(sub_arms.size, dtype=int))
-    delta = c[c!=0]
-
-
-    ## revised simplex
-
-    try:
-        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='revised simplex')
-    except Exception as e:
-        print(str(e))
-        res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point')
-        if res.success == True: 
-            print("LinearProgramming Error_Exception: success")
-        else:
-            print("LinearProgramming Error_Exception: fail") 
-            return np.full(thetas.size, -1)
-
-    if res.success == True: # return res.x
-        result = np.zeros(thetas.size)
-        for i, idx in enumerate(opt_arms):
-            result[idx] = np.inf
-        for i, idx in enumerate(sub_arms):
-            result[idx] = res.x[i]
-        return result
-    else: # Fail
-        if res.status == 2: # we can ignore this failure
-            result = np.zeros(thetas.size)
-            for i, idx in enumerate(opt_arms):
-                result[idx] = np.inf
-            for i, idx in enumerate(sub_arms):
-                result[idx] = res.x[i]
-            return result
-        elif res.status == 4: # numerical difficult error
-            # option_again = {'tol':1e-8, 'sym_pos':False, 'cholesky':False, 'lstsq':True}
-            print("LinearProgramming Error: Numerical difficulties error")
-            res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='interior-point')
-            # res = linprog(delta, A_ub=A_ub, b_ub=b_ub, method='revised simplex', options=option_again)
-            if res.success == True: 
-                print("LinearProgramming Error4: success")
-            else: 
-                print("LinearProgramming Error4: fail")
-                return np.full(thetas.size, -1)
-            
-            result = np.zeros(thetas.size)
-            for i, idx in enumerate(opt_arms):
-                result[idx] = np.inf
-            for i, idx in enumerate(sub_arms):
-                result[idx] = res.x[i]
-            return result
-        else:
-            print("LinearProgramming Error: Last fail")
-            return np.full(thetas.size, -1)
-
 
 ##########################################################################################################################
         
@@ -294,10 +214,10 @@ class OSSB(BasePolicy):
 
         if solve_optimization_problem == "Lipschitz" and LC_value=="estimated":
             self._info_on_solver = ", Lipschitz, estimated"
-            self._solve_optimization_problem = solve_optimization_problem__Lipschitz2
+            self._solve_optimization_problem = solve_optimization_problem__Lipschitz
         if solve_optimization_problem == "Lipschitz" and LC_value=="true":
             self._info_on_solver = ", Lipschitz, true"
-            self._solve_optimization_problem = solve_optimization_problem__Lipschitz2
+            self._solve_optimization_problem = solve_optimization_problem__Lipschitz
         self._kwargs = kwargs  # Keep in memory the other arguments, to give to self._solve_optimization_problem
 
     def __str__(self):
@@ -331,7 +251,7 @@ class OSSB(BasePolicy):
             self.eta_compare = np.zeros(self.nbArms)
             return np.random.choice(np.nonzero(self.pulls < 1)[0])
 
-        thistime_mt = self._solve_optimization_problem(means, **self._kwargs)
+        thistime_mt = self._solve_optimization_problem(means, zeta, **self._kwargs) # should delete zeta
         if np.all(thistime_mt == -1):
             values_c_x_mt = self.old_mt
         else:
@@ -439,21 +359,29 @@ class OSSB_DEL(BasePolicy):
             else:
                 zeta[i] = zeta_value[i]
                 count_undersample += 1
-        self.zeta_info = zeta
-
+        
+        global LCvalue
+        LCvalue = np.inf
         if 'L' in self._kwargs and self._kwargs['L'] == -1:
-            global LCvalue
             LCvalue = estimate_Lipschitz_constant(means)
         elif 'L' in self._kwargs and self._kwargs['L'] == trueLC:
             LCvalue = trueLC
-        self.LC_value = LCvalue        
-
+        self.LC_value = LCvalue
+        
+        check_sum = np.zeros(self.nbArms)
         sum_cons = np.zeros(count_undersample)
-        for i, idx in enumerate(np.where(means != max(means))[0]):
-            nu_confus = get_confusing_bandit(idx, LCvalue, means)
+        for idx, i in enumerate(np.where(means != max(means))[0]):
+            nu_confus = get_confusing_bandit(i, LCvalue, means)
             for k in np.where(means != max(means))[0]:
-                sum_cons[i] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
-             
+                sum_cons[idx] += max(klBern(means[k], nu_confus[k]), 0.05) * (zeta[k] / (1 + self.gamma))
+                check_sum[i] += max(klBern(means[k], nu_confus[k]), 0.05) * (zeta[k] / (1 + self.gamma))
+            """
+            if sum_cons[idx] <= 0.1:
+                if self.pulls[i] >= (log(self.t)**2):
+                    sum_cons[idx] = 1
+            """
+        self.zeta_info = check_sum
+          
         ### start
         underSampledArms = np.where(self.pulls <= log_plus(self.t)/log_plus(log_plus(self.t)))[0]
         if underSampledArms.size > 0:
@@ -463,7 +391,7 @@ class OSSB_DEL(BasePolicy):
             self.eta_solution = 1
             return chosen_arm   
 
-        elif np.all(sum_cons >= 1):
+        elif np.all(sum_cons >= 1) or np.all(self.pulls > (1+1/log_plus(log_plus(self.t)))*(log_plus(self.t)**2)):
             self.phase = Phase.exploitation
             self.compare_info[1] += 1
             bestvalue_arm = np.where(means == np.max(means))[0]
@@ -480,24 +408,11 @@ class OSSB_DEL(BasePolicy):
                 values_c_x_mt = thistime_mt
                 self.oldmt = values_c_x_mt.copy()
             self.eta_solution = values_c_x_mt.copy()
-            """
-            print("-----------------------------------------------------------------")
-            print(self.t)
-            sum_cons = np.zeros(count_undersample)
-            for i, idx in enumerate(np.where(means != max(means))[0]):
-                nu_confus = get_confusing_bandit(idx, LCvalue, means)
-                for k in np.where(means != max(means))[0]:
-                    sum_cons[i] += klBern(means[k], nu_confus[k]) * thistime_mt[k]
-                    print(klBern(means[k], nu_confus[k]))
-            print(thistime_mt)
-            """
-    
-            
    
             values_c_x_mt2 = np.zeros(self.nbArms)
             for i in range(self.nbArms):
                 if i in np.where(means != max(means))[0]:
-                    values_c_x_mt2[i] = (1 + self.gamma) * values_c_x_mt[i]
+                    values_c_x_mt2[i] = min((1+self.gamma)*values_c_x_mt[i], log_plus(self.t))
                 else:
                     values_c_x_mt2[i] = log_plus(self.t)
             self.eta_compare = values_c_x_mt2.copy()
@@ -506,9 +421,55 @@ class OSSB_DEL(BasePolicy):
             self.phase = Phase.exploration
             self.compare_info[2] += 1
             # most under-explored arm
+            values = (values_c_x_mt2**2) * log_plus(self.t) - (self.pulls **2)
+            chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
+            return chosen_arm
+"""
+        if self.t <= self.nbArms:
+            means = np.zeros(self.nbArms)
+            
+    # for error
+        thistime_mt = self._solve_optimization_problem(means, zeta, **self._kwargs)
+        if np.all(thistime_mt == -1):
+            values_c_x_mt = self.old_mt
+        else:
+            values_c_x_mt = thistime_mt
+            self.oldmt = values_c_x_mt.copy()
+        self.eta_solution = values_c_x_mt.copy()
+
+        values_c_x_mt2 = np.zeros(self.nbArms)
+        for i in range(self.nbArms):
+            if i in np.where(means != max(means))[0]:
+                values_c_x_mt2[i] = (1+self.gamma) * min(values_c_x_mt[i], log_plus(self.t))
+            else:
+                values_c_x_mt2[i] = log_plus(self.t)
+        self.eta_compare = values_c_x_mt2.copy()
+
+        ### start
+        underSampledArms = np.where(self.pulls <= log_plus(self.t)/log_plus(log_plus(self.t)))[0]
+        if underSampledArms.size > 0:
+            self.phase = Phase.estimation
+            self.compare_info[0] += 1
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[underSampledArms]))[0])
+            self.eta_solution = 1
+            return chosen_arm   
+
+        elif np.all(self.pulls >= values_c_x_mt2 * log(self.t)):
+            self.phase = Phase.exploitation
+            self.compare_info[1] += 1
+            bestvalue_arm = np.where(means == np.max(means))[0]
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[bestvalue_arm]))[0])
+            return chosen_arm
+
+        else:
+            # exploration          
+            self.phase = Phase.exploration
+            self.compare_info[2] += 1
+            # most under-explored arm
             values = values_c_x_mt2 * log_plus(self.t) - self.pulls
             chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
             return chosen_arm
+"""
 
 
 class LipschitzOSSB_DEL(OSSB_DEL):
