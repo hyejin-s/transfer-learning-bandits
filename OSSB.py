@@ -80,8 +80,8 @@ def solve_optimization_problem__Lipschitz(thetas, zeta, L=-1):
 
     bounds_sub = np.zeros((sub_arms.size, 2))
     for idx, i in enumerate(np.where(thetas != max(thetas))[0]):
-        bounds_sub[idx] = (zeta[i], None)
-        #bounds_sub[idx] = (0, None)
+        #bounds_sub[idx] = (zeta[i], None)
+        bounds_sub[idx] = (0, None)
 
     ## revised simplex
 
@@ -367,21 +367,24 @@ class OSSB_DEL(BasePolicy):
         elif 'L' in self._kwargs and self._kwargs['L'] == trueLC:
             LCvalue = trueLC
         self.LC_value = LCvalue
+        print(LCvalue)
         
         check_sum = np.zeros(self.nbArms)
         sum_cons = np.zeros(count_undersample)
         for idx, i in enumerate(np.where(means != max(means))[0]):
             nu_confus = get_confusing_bandit(i, LCvalue, means)
             for k in np.where(means != max(means))[0]:
-                sum_cons[idx] += max(klBern(means[k], nu_confus[k]), 0.05) * (zeta[k] / (1 + self.gamma))
-                check_sum[i] += max(klBern(means[k], nu_confus[k]), 0.05) * (zeta[k] / (1 + self.gamma))
+                sum_cons[idx] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
+                print(sum_cons)
+                check_sum[i] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
             """
             if sum_cons[idx] <= 0.1:
                 if self.pulls[i] >= (log(self.t)**2):
                     sum_cons[idx] = 1
             """
         self.zeta_info = check_sum
-          
+        
+        # or np.all(self.pulls > (1+1/log_plus(log_plus(self.t)))*(log_plus(self.t)**2))
         ### start
         underSampledArms = np.where(self.pulls <= log_plus(self.t)/log_plus(log_plus(self.t)))[0]
         if underSampledArms.size > 0:
@@ -391,7 +394,7 @@ class OSSB_DEL(BasePolicy):
             self.eta_solution = 1
             return chosen_arm   
 
-        elif np.all(sum_cons >= 1) or np.all(self.pulls > (1+1/log_plus(log_plus(self.t)))*(log_plus(self.t)**2)):
+        elif np.all(sum_cons >= 1):
             self.phase = Phase.exploitation
             self.compare_info[1] += 1
             bestvalue_arm = np.where(means == np.max(means))[0]
@@ -412,7 +415,7 @@ class OSSB_DEL(BasePolicy):
             values_c_x_mt2 = np.zeros(self.nbArms)
             for i in range(self.nbArms):
                 if i in np.where(means != max(means))[0]:
-                    values_c_x_mt2[i] = min((1+self.gamma)*values_c_x_mt[i], log_plus(self.t))
+                    values_c_x_mt2[i] = min((1+self.gamma)*values_c_x_mt[i], log_plus(self.t)*10)
                 else:
                     values_c_x_mt2[i] = log_plus(self.t)
             self.eta_compare = values_c_x_mt2.copy()
@@ -421,7 +424,7 @@ class OSSB_DEL(BasePolicy):
             self.phase = Phase.exploration
             self.compare_info[2] += 1
             # most under-explored arm
-            values = (values_c_x_mt2**2) * log_plus(self.t) - (self.pulls **2)
+            values = values_c_x_mt2 * log_plus(self.t) - self.pulls
             chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
             return chosen_arm
 """
