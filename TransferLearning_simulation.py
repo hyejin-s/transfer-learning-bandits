@@ -21,14 +21,14 @@ def Lipschitz_beta(L_list, epsilon, beta, M_present):
     L_beta = sorted(L_list, reverse=True)[bound_value-1] + epsilon*beta
     return L_beta
 
-HORIZON=10000
+HORIZON=10
 REPETITIONS=1 
 N_JOBS=1
 
-M = 400 # the ordering of Transfer Learning
+M = 2 # the ordering of Transfer Learning
 delta_gap = minimal_gap(embeddings)
 
-alpha = 0.1
+alpha = 0.3
 """
 beta = 0.1
 epsilon = 0.001
@@ -52,21 +52,22 @@ tau_list = []
 
 ##### Transfer Learning #####
 Empirical_Lipschitz = np.zeros((4,M))   # store empirical Lipschitz constant every episode
-POLICIES = [{"archtype":OSSB_DEL, "params":{}}, {"archtype":LipschitzOSSB_DEL, "params":{}}]   
+# POLICIES = [{"archtype":OSSB_DEL, "params":{}}, {"archtype":LipschitzOSSB_DEL, "params":{}}]   
 for m in range(M):
+    POLICIES = []
     print("{} episode".format(m+1))
     # Generate model
     arms = generation.gene_arms(0.2)    # Lipschitz Constant = 0.2
     ENVIRONMENTS = [{"arm_type": Bernoulli, "params": arms}]
     for idx, value in enumerate(valuelist):
         ##### Transfer Learning #####
-        if m < 100 :   # First of all, run OSSB   
+        if m < 2 :   # First of all, run OSSB   
             # OSSB_DEL
-            configuration_beta = {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS, "policies": [POLICIES[0]]}  
+            POLICIES.append({"archtype":OSSB_DEL, "params":{}})
         else:
             beta = value[0]
             epsilon = value[1]
-            tau_list.append(np.min(evaluation_beta.lastPulls[0][0][:,0])) # The smallest number of pulls (just before)
+            tau_list.append(np.min(evaluation.lastPulls[0][0][:,0])) # The smallest number of pulls (just before)
             tau = min(tau_list)
             left_cal = (delta_gap**2)*(epsilon**2)*min(alpha, (alpha-beta))*tau*M
             right_cal = log(HORIZON)
@@ -77,45 +78,37 @@ for m in range(M):
                 betaLC = Lipschitz_beta(Empirical_Lipschitz[idx], epsilon, beta, m)
                 beta_info[idx][m] = betaLC
                 # OSSB_beta
-                configuration_beta = {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS,
-                "policies": [LipschitzOSSB_DEL_beta(nbArms=10, gamma=0.001, L=betaLC)]}   
+                POLICIES.append(LipschitzOSSB_DEL_beta(nbArms=10, gamma=0.001, L=betaLC))
             else:
                 # OSSB_DEL
-                configuration_beta = {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS, "policies": [POLICIES[0]]}  
-
-        evaluation_beta = Evaluator(configuration_beta)
-        for envId, env in tqdm(enumerate(evaluation_beta.envs), desc="Problems"):
-            evaluation_beta.startOneEnv(envId, env)
-        ## evaluation.get_lastmeans()[0][0] -> [ nbArms ]
-            Empirical_Lipschitz[idx][m] = estimate_Lipschitz_constant(evaluation_beta.get_lastmeans()[0][0])
-            regret_transfer[idx][m] = evaluation_beta.getCumulatedRegret_MoreAccurate(policyId=0)[HORIZON-1]
+                POLICIES.append({"archtype":OSSB_DEL, "params":{}})
 
     ##### inf #####
-    configuration_inf= {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS, "policies": [POLICIES[0]]}
-    evaluation_inf = Evaluator(configuration_inf)
-    for envId, env in tqdm(enumerate(evaluation_inf.envs), desc="Problems"):
-        evaluation_inf.startOneEnv(envId, env)
-    regret_inf[m] = evaluation_inf.getCumulatedRegret_MoreAccurate(policyId=0)[HORIZON-1]
+    POLICIES.append({"archtype":OSSB_DEL, "params":{}})
 
     ##### estimated #####
-    configuration_estimated = {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS, "policies": [POLICIES[1]]}
-    evaluation_est = Evaluator(configuration_estimated)
-    for envId, env in tqdm(enumerate(evaluation_est.envs), desc="Problems"):
-        evaluation_est.startOneEnv(envId, env)
-    regret_estimated[m] = evaluation_est.getCumulatedRegret_MoreAccurate(policyId=0)[HORIZON-1]
-    
+    POLICIES.append({"archtype":LipschitzOSSB_DEL, "params":{}}) 
+
     ##### true #####
     trueLC = estimate_Lipschitz_constant(arms) 
-    configuration_true = {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS,
-    "policies": [LipschitzOSSB_DEL_true(nbArms=10, gamma=0.001, L=trueLC)]}
-    evaluation = Evaluator(configuration_true)
+    POLICIES.append(LipschitzOSSB_DEL_beta(nbArms=10, gamma=0.001, L=trueLC))
+
+
+    configuration = {"horizon": HORIZON, "repetitions": REPETITIONS, "n_jobs": N_JOBS, "verbosity": 6, "environment": ENVIRONMENTS, "policies": POLICIES}
+    evaluation = Evaluator(configuration)
     for envId, env in tqdm(enumerate(evaluation.envs), desc="Problems"):
         evaluation.startOneEnv(envId, env)
-    regret_true[m] = evaluation.getCumulatedRegret_MoreAccurate(policyId=0)[HORIZON-1]
+    
+    for idx, value in enumerate(valuelist):
+        Empirical_Lipschitz[idx][m] = estimate_Lipschitz_constant(evaluation.get_lastmeans()[idx][0])
+        regret_transfer[idx][m] = evaluation.getCumulatedRegret_MoreAccurate(policyId=idx)[HORIZON-1]
+   
+    regret_inf[m] = evaluation.getCumulatedRegret_MoreAccurate(policyId=4)[HORIZON-1]
+    regret_estimated[m] = evaluation.getCumulatedRegret_MoreAccurate(policyId=5)[HORIZON-1]
+    regret_true[m] = evaluation.getCumulatedRegret_MoreAccurate(policyId=6)[HORIZON-1]
 
 
-
-colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'palevioletred', 'lightpink'] # 7
+colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'mediumorchid', 'rebeccapurple'] # 7
 
 def plotRegret(filepath):
     plt.figure()
@@ -139,6 +132,17 @@ with open(dir_name+ "/L_beta.txt", "w") as f:
         f.write("\n{}".format(i))
         for episode in range(len(beta_info[i])):
             f.write("\nepisode:{}, {}".format(episode, beta_info[i, episode]))
+
+with open(dir_name+ "/EmpiricalLipschitz.txt", "w") as f:
+    for i in range(len(Empirical_Lipschitz)):
+        f.write("\n{}".format(i))
+        for episode in range(len(Empirical_Lipschitz[i])):
+            f.write("\nepisode:{}, {}".format(episode, Empirical_Lipschitz[i, episode]))
+with open(dir_name+ "/regret_transfer.txt", "w") as f:
+    for i in range(len(regret_transfer)):
+        f.write("\n{}".format(i))
+        for episode in range(len(regret_transfer[i])):
+            f.write("\nepisode:{}, {}".format(episode, regret_transfer[i, episode]))
 
 with open(dir_name+ "/com_info.txt", "w") as f:
     for i in range(len(com_info)):
