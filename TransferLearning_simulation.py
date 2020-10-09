@@ -47,6 +47,8 @@ regret_transfer = np.zeros((4,M))
 
 # for print
 beta_info = np.zeros((4,M))
+com_info = np.zeros((4,M,2))
+tau_list = []
 
 ##### Transfer Learning #####
 Empirical_Lipschitz = np.zeros((4,M))   # store empirical Lipschitz constant every episode
@@ -64,10 +66,13 @@ for m in range(M):
         else:
             beta = value[0]
             epsilon = value[1]
-            #### 다시 체크
-            tau = np.min(evaluation_beta.lastPulls[0][0][:,0]) # The smallest number of pulls (just before?)
+            tau_list.append(np.min(evaluation_beta.lastPulls[0][0][:,0])) # The smallest number of pulls (just before)
+            tau = min(tau_list)
             left_cal = (delta_gap**2)*(epsilon**2)*min(alpha, (alpha-beta))*tau*M
             right_cal = log(HORIZON)
+            
+            com_info[idx][m][0] = left_cal
+            com_info[idx][m][1] = right_cal
             if left_cal > right_cal: #L_beta
                 betaLC = Lipschitz_beta(Empirical_Lipschitz[idx], epsilon, beta, m)
                 beta_info[idx][m] = betaLC
@@ -134,5 +139,11 @@ with open(dir_name+ "/L_beta.txt", "w") as f:
         f.write("\n{}".format(i))
         for episode in range(len(beta_info[i])):
             f.write("\nepisode:{}, {}".format(episode, beta_info[i, episode]))
+
+with open(dir_name+ "/com_info.txt", "w") as f:
+    for i in range(len(com_info)):
+        f.write("\n{}".format(i))
+        for episode in range(len(com_info[i])):
+            f.write("\nepisode:{}, {}, {}".format(episode, com_info[i, episode, 0], com_info[i, episode, 1]))
 
 plotRegret(dir_name)
