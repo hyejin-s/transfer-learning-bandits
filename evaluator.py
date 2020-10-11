@@ -137,6 +137,7 @@ class Evaluator(object):
         self.estimatedLipschitz = dict()
         self.etaSolution = dict()
         self.etaCompare = dict()
+        self.zetaInfo = dict()
         self.compareInfo = dict()
         self.cumreward = dict()      
         self.cumpull = dict()
@@ -150,9 +151,10 @@ class Evaluator(object):
             self.runningTimes[envId] = np.zeros((self.nbPolicies, self.repetitions))
             self.memoryConsumption[envId] = np.zeros((self.nbPolicies, self.repetitions))
             self.numberOfCPDetections[envId] = np.zeros((self.nbPolicies, self.repetitions), dtype=np.int32)
-            self.estimatedLipschitz[envId] = np.zeros((self.repetitions, self.horizon))
+            self.estimatedLipschitz[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon))
             self.etaSolution[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
             self.etaCompare[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
+            self.zetaInfo[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
             self.compareInfo[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, 3))
             self.cumreward[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
             self.cumpull[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
@@ -267,10 +269,10 @@ class Evaluator(object):
             self.lastPulls[envId][policyId, :, repeatId] = r.pulls
             self.runningTimes[envId][policyId, repeatId] = r.running_time
             self.numberOfCPDetections[envId][policyId, repeatId] = r.number_of_cp_detections
-            if policyId == 1:
-                self.estimatedLipschitz[envId][repeatId] = r.estimatedLC
+            self.estimatedLipschitz[envId][policyId][repeatId] = r.estimatedLC
             self.etaSolution[envId][policyId][repeatId] = r.eta_Solution
             self.etaCompare[envId][policyId][repeatId] = r.eta_Compare
+            self.zetaInfo[envId][policyId][repeatId] = r.zeta_Info
             self.compareInfo[envId][policyId][repeatId] = r.compare_Info
             for armId in range(env.nbArms):
                 for t in range(self.horizon):
@@ -816,6 +818,7 @@ class Evaluator(object):
         plt.savefig(filepath+'/num_ArmPulls_top_bottom10%mean', dpi=300)
         return fig
     
+    # check lastPulls
     def check_value(self, filepath, envId=0):
         cum_pullarm = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms))
         for i, policyId in enumerate(self.policies):
@@ -903,7 +906,7 @@ class Evaluator(object):
         Lips_list = np.zeros((self.repetitions))
         
         for repeatId in range(self.repetitions):
-            Lips_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            Lips_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
             Lips_list[repeatId] = Lips_value
         plt.hist(Lips_list, label=self.policies[1].__cachedstr__, color=colors[0])
         legend()
@@ -923,11 +926,11 @@ class Evaluator(object):
 
         last_pull = np.transpose(self.lastPulls[envId][1]) # repetition, arm
         for repeatId in range(self.repetitions):
-            if self.estimatedLipschitz[envId][repeatId][self.horizon-1] < ref_value:
+            if self.estimatedLipschitz[envId][1][repeatId][self.horizon-1] < ref_value:
                 Y = last_pull[repeatId]
                 Y_list.append(Y)
                 repeat_list.append(repeatId)
-                plt.plot(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
+                plt.plot(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][1][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
         #legend()
         #plt.xlabel('Ordering of arms')
         #plt.ylabel('Number of arms pulls')
@@ -937,7 +940,7 @@ class Evaluator(object):
         with open(filepath+ "/Condition_repeatId.txt", "w") as f:
             for i in range(len(repeat_list)):
                 f.write("\n"+str(repeat_list[i])+": ")
-                f.write(str(self.estimatedLipschitz[envId][repeat_list[i]][self.horizon-1]))
+                f.write(str(self.estimatedLipschitz[envId][1][repeat_list[i]][self.horizon-1]))
 
         return fig 
     
@@ -946,11 +949,11 @@ class Evaluator(object):
         count = 1
         last_pull = np.transpose(self.lastPulls[envId][1]) # repetition, arm
         for repeatId in range(self.repetitions):
-            if self.estimatedLipschitz[envId][repeatId][self.horizon-1] < ref_value:
+            if self.estimatedLipschitz[envId][1][repeatId][self.horizon-1] < ref_value:
                 count +=1
                 X = np.array([i + 0.8*count for i in range(self.envs[envId].nbArms)])
                 Y = last_pull[repeatId]
-                plt.bar(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
+                plt.bar(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][1][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
         legend()
         X = np.arange(self.envs[envId].nbArms)
         plt.xticks([i*count + (1/count) for i in range(self.envs[envId].nbArms)], X)
@@ -969,8 +972,8 @@ class Evaluator(object):
         trueLCs = np.full(self.horizon, trueLC)
         plt.plot(X, trueLCs, label='true Lipschitz Constant')
 
-        meanLC = self.estimatedLipschitz[envId].mean(axis=0)
-        std = np.std(self.estimatedLipschitz[envId], axis=0)/np.sqrt(self.repetitions)
+        meanLC = self.estimatedLipschitz[envId][1].mean(axis=0)
+        std = np.std(self.estimatedLipschitz[envId][1], axis=0)/np.sqrt(self.repetitions)
         ci = 1.96*std
         plt.plot(X, meanLC, label='estimated Lipschitz Constant', color='green')
         plt.fill_between(X, meanLC-ci, meanLC+ci, alpha=0.3, color='green')
@@ -989,7 +992,7 @@ class Evaluator(object):
         for repeatId in range(self.repetitions):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
             if estimated_value < ref_value:
                 ratio_suboptimal = cum_pullarm[repeatId][0] / self.horizon #sub_optimalarm
                 Q[estimated_value].append(ratio_suboptimal)
@@ -1036,7 +1039,7 @@ class Evaluator(object):
         for repeatId in range(self.repetitions):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
             if estimated_value < standard_value:
                 Q[0].append(cum_pullarm[repeatId])
             else:
@@ -1071,7 +1074,7 @@ class Evaluator(object):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
             # save key: repeatId, value: Estimated Lipschitz Constant
-            EL_repetition[repeatId] = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            EL_repetition[repeatId] = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
         align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
 
         # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
@@ -1111,7 +1114,7 @@ class Evaluator(object):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
             # save key: repeatId, value: Estimated Lipschitz Constant
-            EL_repetition[repeatId] = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            EL_repetition[repeatId] = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
         align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
 
         # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
@@ -1150,7 +1153,7 @@ class Evaluator(object):
         for repeatId in range(self.repetitions):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
             ratio_suboptimal = cum_pullarm[repeatId][0] / self.horizon #sub_optimalarm
             Q[estimated_value // split_value].append(ratio_suboptimal)
 
@@ -1241,20 +1244,24 @@ class Evaluator(object):
 
         # estimated Lipschitz Constant
         with open(filepath+ "/estimated_Lipschitz_Constant.txt", "w") as f:
-            for repeatId in range(self.repetitions):
-                f.write('\nRepeat: '+str(repeatId))
-                for t in range(self.horizon):
-                    #if t % 1000 == 1:
-                    f.write('\nt={}, '.format(t))
-                    f.write(str(self.estimatedLipschitz[envId][repeatId][t]))
+            for policyId in range(self.nbPolicies):
+                f.write("\nPolicy: " + str(policyId) + "\n")
+                for repeatId in range(self.repetitions):
+                    f.write('\nRepeat: '+str(repeatId))
+                    for t in range(self.horizon):
+                        #if t % 1000 == 1:
+                        f.write('\nt={}, '.format(t))
+                        f.write(str(self.estimatedLipschitz[envId][policyId][repeatId][t]))
             
         with open(filepath+ "/estimated_Lipschitz_Constant_last.txt", "w") as f:
-            for repeatId in range(self.repetitions):
-                f.write("\n")
-                f.write('Repeat: '+str(repeatId))
-                f.write("\n")
-                f.write(str(self.estimatedLipschitz[envId][repeatId][self.horizon-1]))
-                f.write("\n")
+            for policyId in range(self.nbPolicies):
+                f.write("\nPolicy: " + str(policyId) + "\n")
+                for repeatId in range(self.repetitions):
+                    f.write("\n")
+                    f.write('Repeat: '+str(repeatId))
+                    f.write("\n")
+                    f.write(str(self.estimatedLipschitz[envId][policyId][repeatId][self.horizon-1]))
+                    f.write("\n")
         
         # Result of Linear Programming
         with open(filepath+"/LP_solutions.txt", "w") as f:
@@ -1286,6 +1293,17 @@ class Evaluator(object):
                     f.write("\nRepeat: "+str(repeatId))
                     f.write("\n")
                     np.savetxt(f, self.etaCompare[envId][i][repeatId][self.horizon-1], newline=", ", fmt='%.4f')
+        
+        with open(filepath+"/zeta_information.txt", "w") as f:
+            for i, policy in enumerate(self.policies):
+                f.write("\nPolicy: " + str(policy) + "\n")
+                for repeatId in range(self.repetitions):
+                    f.write("\nRepeat: "+str(repeatId))
+                    f.write("\n")
+                    for t in range(self.horizon):
+                        #if t % 1000 == 1:
+                        f.write("\nt={}, ".format(t))
+                        np.savetxt(f, self.zetaInfo[envId][i][repeatId][t], newline=", ", fmt='%.4f')
 
         with open(filepath+"/action_compareInfo.txt", "w") as f:
             f.write("[estimation, exploitation, exploration]")
@@ -1300,7 +1318,7 @@ class Evaluator(object):
                         np.savetxt(f, self.compareInfo[envId][i][repeatId][t], newline=", ", fmt='%.4f')
          
         # define cumreward and cumpull
-        with open(filepath+ "/arms_cumreward_test.txt", "w") as f:
+        with open(filepath+ "/arms_cumreward.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
@@ -1310,7 +1328,7 @@ class Evaluator(object):
                         f.write("\nt= "+str(t)+", ")
                         np.savetxt(f, self.cumreward[envId][i][repeatId, :, t].astype(int), fmt='%i', newline=", ")
         
-        with open(filepath+ "/arms_cumpull_test.txt", "w") as f:
+        with open(filepath+ "/arms_cumpull.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
@@ -1321,7 +1339,7 @@ class Evaluator(object):
                         np.savetxt(f, self.cumpull[envId][i][repeatId, :, t].astype(int), fmt='%i', newline=", ")
     
 
-        with open(filepath+ "/Empirical_means_test.txt", "w") as f:
+        with open(filepath+ "/Empirical_means.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
@@ -1335,7 +1353,7 @@ class Evaluator(object):
                         np.savetxt(f, mean_divide, fmt='%1.3f', newline=", ")
 
         # def get_lastmeans()
-        with open(filepath+ "/Empirical_means_last_test.txt", "w") as f:
+        with open(filepath+ "/Empirical_means_last.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
                 for repeatId in range(self.repetitions):
@@ -1653,11 +1671,12 @@ def delayed_play(env, policy, horizon,
         # 1. The player's policy choose an arm
         choice = policy.choice()
 
-        if('L' in policy._kwargs and policy._kwargs['L']==-1):
-            result.estimatedLC[t] = policy.LC_value
+        #if('L' in policy._kwargs and policy._kwargs['L']==-1):
+        result.estimatedLC[t] = policy.LC_value
         
         result.eta_Solution[t] = policy.eta_solution
         result.eta_Compare[t] = policy.eta_compare
+        result.zeta_Info[t] = policy.zeta_info
         result.compare_Info[t] = policy.compare_info
 
 
