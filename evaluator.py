@@ -55,7 +55,7 @@ MORE_ACCURATE = True           #: Use the count of selections instead of rewards
 FINAL_RANKS_ON_AVERAGE = True  #: Final ranks are printed based on average on last 1% rewards and not only the last rewards
 USE_JOBLIB_FOR_POLICIES = False  #: Don't use joblib to parallelize the simulations on various policies (we parallelize the random Monte Carlo repetitions)
 
-ref_value = 50
+ref_value = 20
 
 
 class Evaluator(object):
@@ -721,10 +721,128 @@ class Evaluator(object):
             else:
                 plt.ylabel(r"Regret $R_t = t \mu^* - \sum_{s=1}^{t}$ %s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{E}_{%d}[T_k(t)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$ (from actual rewards)" % (self.repetitions), ylabel2))
             plt.title("Cumulated regrets for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
-        if semilogy:
-            plt.savefig(filepath+'/Regret_semilogy', dpi=300)
-        else:
+    
             plt.savefig(filepath+'/Regret', dpi=300)
+        return fig
+
+    def plotRegrets_log(self, filepath, envId=0,
+                    savefig=None, meanReward=False,
+                    plotSTD=False, plotMaxMin=False,
+                    semilogx=False, semilogy=False, loglog=False,
+                    normalizedRegret=False, drawUpperBound=False,
+                    moreAccurate=None
+                    ):
+        """Plot the centralized cumulated regret, support more than one environments (use evaluators to give a list of other environments). """
+        moreAccurate = moreAccurate if moreAccurate is not None else self.moreAccurate
+        fig = plt.figure()
+        ymin = 0
+        colors = palette(self.nbPolicies)
+        markers = makemarkers(self.nbPolicies)
+        X = self._times - 1
+        plot_method = plt.loglog if loglog else plt.plot
+        plot_method = plt.semilogy if semilogy else plot_method
+        plot_method = plt.semilogx if semilogx else plot_method
+        for i, policy in enumerate(self.policies):
+            if meanReward:
+                Y = self.getAverageRewards(i, envId)
+            else:
+                Y = self.getCumulatedRegret(i, envId, moreAccurate=moreAccurate)/self._times
+                if normalizedRegret:
+                    Y /= np.log(X + 2)   # XXX prevent /0
+            ymin = min(ymin, np.min(Y))
+            lw = 10 if ('$N=' in policy.__cachedstr__ or 'Aggr' in policy.__cachedstr__ or 'CORRAL' in policy.__cachedstr__ or 'LearnExp' in policy.__cachedstr__ or 'Exp4' in policy.__cachedstr__) else 8
+            if len(self.policies) > 8: lw -= 1
+            if semilogx or loglog:
+                # FIXED for semilogx plots, truncate to only show t >= 100
+                X_to_plot_here = X[X >= 100]
+                Y_to_plot_here = Y[X >= 100]
+                plot_method(X_to_plot_here[::self.delta_t_plot], Y_to_plot_here[::self.delta_t_plot], label=policy.__cachedstr__, color=colors[i], marker=markers[i], markevery=(i / 50., 0.1), lw=lw, ms=int(1.5*lw))
+            else:
+                plot_method(X[::self.delta_t_plot], Y[::self.delta_t_plot], label=policy.__cachedstr__, color=colors[i], marker=markers[i], markevery=(i / 50., 0.1), lw=lw, ms=int(1.5*lw))
+            if semilogx or loglog:  # Manual fix for issue https://github.com/SMPyBandits/SMPyBandits/issues/38
+                plt.xscale('log')
+            if semilogy or loglog:  # Manual fix for issue https://github.com/SMPyBandits/SMPyBandits/issues/38
+                plt.yscale('log')
+            # Print standard deviation of regret
+            if plotSTD and self.repetitions > 1:
+                stdY = self.getSTDRegret(i, envId, meanReward=meanReward)
+                if normalizedRegret:
+                    stdY /= np.log(2 + X)
+                plt.fill_between(X[::self.delta_t_plot], Y[::self.delta_t_plot] - stdY[::self.delta_t_plot], Y[::self.delta_t_plot] + stdY[::self.delta_t_plot], facecolor=colors[i], alpha=0.2)
+            # Print amplitude of regret
+            if plotMaxMin and self.repetitions > 1:
+                MaxMinY = self.getMaxMinReward(i, envId) / 2.
+                if normalizedRegret:
+                    MaxMinY /= np.log(2 + X)
+                plt.fill_between(X[::self.delta_t_plot], Y[::self.delta_t_plot] - MaxMinY[::self.delta_t_plot], Y[::self.delta_t_plot] + MaxMinY[::self.delta_t_plot], facecolor=colors[i], alpha=0.2)
+        self._xlabel(envId, r"Time steps $t = 1...T$, horizon $T = {}${}".format(self.horizon, self.signature))
+        lowerbound = self.envs[envId].lowerbound()
+        lowerbound_sparse = self.envs[envId].lowerbound_sparse()
+        if not (semilogx or semilogy or loglog):
+            print("\nThis MAB problem has: \n - a [Lai & Robbins] complexity constant C(mu) = {:.3g} for 1-player problem... \n - a Optimal Arm Identification factor H_OI(mu) = {:.2%} ...".format(lowerbound, self.envs[envId].hoifactor()))  # DEBUG
+            if self.envs[envId]._sparsity is not None and not np.isnan(lowerbound_sparse):
+                print("\n- a [Kwon et al] sparse lower-bound with s = {} non-negative arm, C'(mu) = {:.3g}...".format(self.envs[envId]._sparsity, lowerbound_sparse))  # DEBUG
+        if not meanReward:
+            if semilogy or loglog:
+                ymin = max(0, ymin)
+            plt.ylim(ymin, plt.ylim()[1])
+        # Get a small string to add to ylabel
+        ylabel2 = r"%s%s" % (r", $\pm 1$ standard deviation" if (plotSTD and not plotMaxMin) else "", r", $\pm 1$ amplitude" if (plotMaxMin and not plotSTD) else "")
+        if meanReward:
+            if hasattr(self.envs[envId], 'get_allMeans'):
+                # DONE this is now fixed for non-stationary bandits
+                means = self.envs[envId].get_allMeans(horizon=self.horizon)
+                minArm, maxArm = np.min(means), np.max(means)
+            else:
+                minArm, maxArm = self.envs[envId].minArm, self.envs[envId].maxArm
+            # We plot a horizontal line ----- at the best arm mean
+            plt.plot(X[::self.delta_t_plot], self.envs[envId].maxArm * np.ones_like(X)[::self.delta_t_plot], 'k--', label="Largest mean = ${:.3g}$".format(maxArm))
+            legend()
+            plt.ylabel(r"Mean reward, average on time $\tilde{r}_t = \frac{1}{t} \sum_{s=1}^{t}$ %s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{E}_{%d}[T_k(t)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$" % (self.repetitions), ylabel2))
+            if not self.envs[envId].isChangingAtEachRepetition and not self.nb_break_points > 0:
+                plt.ylim(0.80 * minArm, 1.10 * maxArm)
+            # if self.nb_break_points > 0:
+            #     plt.ylim(0, 1)  # FIXME do better!
+            plt.title("Mean rewards for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
+        elif normalizedRegret:
+            if self.plot_lowerbound:
+                # We also plot the Kwon et al lower bound
+                if self.envs[envId]._sparsity is not None and not np.isnan(lowerbound_sparse):
+                    plt.plot(X[::self.delta_t_plot], lowerbound_sparse * np.ones_like(X)[::self.delta_t_plot], 'k--', label="[Kwon et al.] lower bound, $s = {}$, $= {:.3g}$".format(self.envs[envId]._sparsity, lowerbound_sparse), lw=3)
+            legend()
+            if self.nb_break_points > 0:
+                # DONE fix math formula in case of non stationary bandits
+                plt.ylabel("Normalized non-stationary regret\n" + r"$\frac{R_t}{\log(t)} = \frac{1}{\log(t)}\sum_{s=1}^{t} \max_k \mu_k(t) - \frac{1}{\log(t)}$ %s%s" % (r"$\sum_{s=1}^{t} \sum_{k=1}^{%d} \mu_k(t) \mathbb{E}_{%d}[1(I(t)=k)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\sum_{s=1}^{t} $\mathbb{E}_{%d}[r_s]$" % (self.repetitions), ylabel2))
+            else:
+                plt.ylabel(r"Normalized regret%s$\frac{R_t}{\log(t)} = \frac{t}{\log(t)} \mu^* - \frac{1}{\log(t)}\sum_{s=1}^{t}$ %s%s" % ("\n", r"$\sum_{k=1}^{%d} \mu_k\mathbb{E}_{%d}[T_k(t)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$" % (self.repetitions), ylabel2))
+            plt.title("Normalized cumulated regrets for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
+        else:
+            if drawUpperBound and not (semilogx or loglog):
+                # Experiment to print also an upper bound: it is CRAZILY huge!!
+                lower_amplitudes = np.asarray([arm.lower_amplitude for arm in self.envs[envId].arms])
+                amplitude = np.max(lower_amplitudes[:, 1])
+                maxVariance = max([p * (1 - p) for p in self.envs[envId].means])
+                K = self.envs[envId].nbArms
+                upperbound = 76 * np.sqrt(maxVariance * K * X) + amplitude * K
+                plt.plot(X[::self.delta_t_plot], upperbound[::self.delta_t_plot], 'r-', label=r"Minimax upper-bound for kl-UCB++", lw=3)
+            # FIXED for semilogx plots, truncate to only show t >= 100
+            if semilogx or loglog:
+                X = X[X >= 100]
+            else:
+                X = X[X >= 1]
+            if self.plot_lowerbound:
+                # We also plot the Kwon et al lower bound
+                if self.envs[envId]._sparsity is not None and not np.isnan(lowerbound_sparse):
+                    plt.plot(X[::self.delta_t_plot], lowerbound_sparse * np.ones_like(X)[::self.delta_t_plot], 'k--', label=r"[Kwon et al.] lower bound, $s = {}$, $= {:.3g} \; \log(t)$".format(self.envs[envId]._sparsity, lowerbound_sparse), lw=3)
+            legend()
+            if self.nb_break_points > 0:
+                # DONE fix math formula in case of non stationary bandits
+                plt.ylabel("Non-stationary regret\n" + r"$R_t = \sum_{s=1}^{t} \max_k \mu_k(s) - \sum_{s=1}^{t}$%s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{P}_{%d}[A(t)=k]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$" % (self.repetitions), ylabel2))
+            else:
+                plt.ylabel(r"Regret $R_t = t \mu^* - \sum_{s=1}^{t}$ %s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{E}_{%d}[T_k(t)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$ (from actual rewards)" % (self.repetitions), ylabel2))
+            plt.title("Cumulated regrets for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
+    
+        plt.savefig(filepath+'/Regret_log', dpi=300)
         return fig
 
     def plotBestArmPulls(self, envId=0, savefig=None):
@@ -1032,7 +1150,6 @@ class Evaluator(object):
     def plotConditionalExpectation_bisection(self, filepath, envId=0):
         Q = defaultdict(list)
         fig = plt.figure()
-        standard_value = 20
         
         colors =['tomato', 'deepskyblue']
         cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
@@ -1040,7 +1157,7 @@ class Evaluator(object):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
             estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-            if estimated_value < standard_value:
+            if estimated_value < ref_value:
                 Q[0].append(cum_pullarm[repeatId])
             else:
                 Q[1].append(cum_pullarm[repeatId])
@@ -1054,16 +1171,43 @@ class Evaluator(object):
         plt.plot(X, Y[0], label='Lipschitz Constant<20', color=colors[0])
         plt.plot(X, Y[1], label='Lipschitz Constant>20', color=colors[1])
         legend()
-        plt.xlabel('Estimated Lipschitz Constant_bisection')
+        plt.xlabel('Order of Arms')
         plt.ylabel('Ratio of suboptimal arms pulls')
-        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.title('Estimated Lipschitz Constant bisection_Mean number of times each arm pulls in ${}$:\n Total {} repetitions'.format(self.horizon, self.repetitions))
         plt.savefig(filepath+'/ConditionalExpectation_bisection', dpi=300)   
 
         return fig
+    
+    def plotConditionalExpectation_bottom(self, filepath, envId=0):
+        Q = defaultdict(list)
+        fig = plt.figure()
+        
+        colors =['tomato', 'deepskyblue']
+        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
+        for repeatId in range(self.repetitions):
+            for t in range(self.horizon):
+                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
+            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
+            if estimated_value < ref_value:
+                Q[0].append(cum_pullarm[repeatId])
+        
+        X = np.arange(self.envs[envId].nbArms)
+        Y = []
+        for i in range(len(Q.keys())):
+            meanY = np.array(list(Q.values())[i]).mean(axis=0)
+            Y.append(meanY)
 
-    def plotConditionalExpectation_bisection20(self, filepath, envId=0):
+        plt.plot(X, Y[0], label='Lipschitz Constant<20', color=colors[0])
+        legend()
+        plt.xlabel('Order of Arms')
+        plt.ylabel('Ratio of suboptimal arms pulls')
+        plt.title('In case of Estimated Lipschitz Constant < {}, mean number of times each arm pulls in {}:\n Total {} repetitions'.format(ref_value, self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_bottom', dpi=300)   
+
+        return fig
+
+    def plotConditionalExpectation_topbottom(self, filepath, envId=0):
         # top and bottom 30%
-
         EL_repetition = defaultdict()
         percent = 0.2
 
@@ -1090,64 +1234,23 @@ class Evaluator(object):
         for i in range(len(Q.keys())):
             meanY = np.array(list(Q.values())[i]).mean(axis=0)
             Y.append(meanY)
-        
-        plt.plot(X, Y[0], label='Lipschitz Constant bottom 20%', color=colors[0])
-        plt.plot(X, Y[1], label='Lipschitz Constant top 20%', color=colors[1])
+
+        plt.plot(X, Y[0], label='Lipschitz Constant bottom {}%'.format(percent*100), color=colors[0])
+        plt.plot(X, Y[1], label='Lipschitz Constant top {}%'.format(percent*100), color=colors[1])
         legend()
-        plt.xlabel('Estimated Lipschitz Constant_bisection')
+        plt.xlabel('Order of Arms')
         plt.ylabel('Ratio of suboptimal arms pulls')
-        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
-        plt.savefig(filepath+'/ConditionalExpectation_bisection20', dpi=300)   
-
-        return fig
-
-    def plotConditionalExpectation_bisection30(self, filepath, envId=0):
-        # top and bottom 30%
-
-        EL_repetition = defaultdict()
-        percent = 0.3
-
-        # last pull
-        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
-        for repeatId in range(self.repetitions):
-            # last pull
-            for t in range(self.horizon):
-                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            # save key: repeatId, value: Estimated Lipschitz Constant
-            EL_repetition[repeatId] = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-        align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
-
-        # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
-        
-        Q = defaultdict(list)
-        fig = plt.figure()
-        colors =['tomato', 'deepskyblue']
-        for i in range(int(self.repetitions*percent)):
-            Q[0].append(cum_pullarm[align_ELrepetition[i][0]]) # bottom30
-            Q[1].append(cum_pullarm[align_ELrepetition[self.repetitions-i-1][0]]) #top30
-        X = np.arange(self.envs[envId].nbArms)
-        Y = []
-        for i in range(len(Q.keys())):
-            meanY = np.array(list(Q.values())[i]).mean(axis=0)
-            Y.append(meanY)
-
-
-        plt.plot(X, Y[0], label='Lipschitz Constant bottom 30%', color=colors[0])
-        plt.plot(X, Y[1], label='Lipschitz Constant top 30%', color=colors[1])
-        legend()
-        plt.xlabel('Estimated Lipschitz Constant_bisection')
-        plt.ylabel('Ratio of suboptimal arms pulls')
-        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
-        plt.savefig(filepath+'/ConditionalExpectation_bisection30', dpi=300)   
+        plt.title('Estmated Lipschitz Constant_top and bottom {} percent_Mean number of times each arm pulls in {}:\n Total {} repetitions'.format(percent*100, self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_topbottom', dpi=300)   
 
         return fig   
 
-
+    # for representing ratio of pull suboptimal arm
     def plotConditionalExpectation_split(self, filepath, envId=0):
         Q = defaultdict(list)
 
         fig = plt.figure()
-        split_value = 20
+        split_value = 30
 
         cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
         for repeatId in range(self.repetitions):
@@ -1177,8 +1280,6 @@ class Evaluator(object):
         plt.ylabel('Ratio of suboptimal arms pulls')
         plt.title('The ratio of suboptimal arm pulls for each Estimated Lipschitz Constant:\n Total {} repetitions, {} times'.format(self.repetitions, self.horizon))
         plt.savefig(filepath+'/ConditionalExpectation_split', dpi=300)   
-      
-        return fig    
     
     def savedata(self, filepath, envId=0, moreAccurate=True):
         # information (arms, embeddings, repetitions, epsilon, GAMMA)
@@ -1274,7 +1375,7 @@ class Evaluator(object):
                         #if t % 1000 == 1:
                         f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.etaSolution[envId][i][repeatId][t], newline=", ", fmt='%.4f')
-        
+            
         with open(filepath+"/LPcompare_solutions.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write("\nPolicy: " + str(policy) + "\n")
@@ -1316,7 +1417,7 @@ class Evaluator(object):
                         #if t % 100 == 1:
                         f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.compareInfo[envId][i][repeatId][t], newline=", ", fmt='%.4f')
-         
+            
         # define cumreward and cumpull
         with open(filepath+ "/arms_cumreward.txt", "w") as f:
             for i, policy in enumerate(self.policies):
@@ -1327,7 +1428,7 @@ class Evaluator(object):
                         #if t % 100 == 1:
                         f.write("\nt= "+str(t)+", ")
                         np.savetxt(f, self.cumreward[envId][i][repeatId, :, t].astype(int), fmt='%i', newline=", ")
-        
+            
         with open(filepath+ "/arms_cumpull.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
