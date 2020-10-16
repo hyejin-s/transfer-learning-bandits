@@ -23,7 +23,7 @@ ax.bar(X2, bottom, width, label="bottom 20.0%")
 ax2.bar(X2, bottom, width)
 
 ax.set_ylim(40000, 50000) # outliers only
-ax2.set_ylim(0, 10000) # most of the data
+ax2.set_ylim(0, 5000) # most of the data
 
 # hide the spines between ax and ax2
 ax.spines['bottom'].set_visible(False)
@@ -38,7 +38,7 @@ ax.bar(X1, top, width, label="top 20.0%")
 ax2.bar(X1, top, width)
 
 ax.set_ylim(40000, 50000) # outliers only
-ax2.set_ylim(0, 10000) # most of the data
+ax2.set_ylim(0, 5000) # most of the data
 
 # hide the spines between ax and ax2
 ax.spines['bottom'].set_visible(False)
@@ -60,7 +60,7 @@ ax2.plot((1-d, 1+d), (1-d, 1+d), **kwargs)  # bottom-right diagonal
 ax.legend(fontsize=12)
 
 ax.set_yticklabels(['40k','','','','','50k'], fontsize=12)
-ax2.set_yticklabels([0,'','','','','10k'], fontsize=12)
+ax2.set_yticklabels([0,'','','','','5k'], fontsize=12)
 ax2.set_xticklabels(['','1','2','3','4','5','6'], fontsize=11)
 plt.xlabel('Arm Index', fontsize=20)
 plt.ylabel('                  Number of Pulls', fontsize=20)
