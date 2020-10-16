@@ -59,6 +59,7 @@ ax2.plot((1-d, 1+d), (1-d, 1+d), **kwargs)  # bottom-right diagonal
 
 ax.legend(fontsize=12)
 
+
 ax.set_yticklabels(['40k','','','','','50k'], fontsize=12)
 ax2.set_yticklabels([0,'','','','','5k'], fontsize=12)
 ax2.set_xticklabels(['','1','2','3','4','5','6'], fontsize=11)
