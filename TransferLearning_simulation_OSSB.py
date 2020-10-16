@@ -16,19 +16,20 @@ N_JOBS=40
 
 M = 400 # the ordering of Transfer Learning
 bound = 100 # num of L = inf
-geneLC = 0.5
+geneLC = 0.2
 
-dir_name = "ha01"
+dir_name = "L_information2"
 if not os.path.exists(dir_name):
     os.makedirs(dir_name)
 
 from GenerativeModel6 import GenerativeModel, embeddings
 generation = GenerativeModel(6) #The number of arms = 6
 
+
 def Lipschitz_beta(L_list, epsilon, beta, M_present):
     bound_value = ceil(beta*M_present) # ROUND UP
     #L_list.sort(reverse=True)
-    L_beta = sorted(L_list, reverse=True)[bound_value-1] + epsilon*beta
+    L_beta = sorted(L_list, reverse=True)[bound_value-1] + epsilon
     return L_beta
 
 def com_Lipschitz_constant(thetas, embeddings):
@@ -37,15 +38,11 @@ def com_Lipschitz_constant(thetas, embeddings):
         L_values.append(abs(thetas[i+1]-thetas[i])/(embeddings[i+1]-embeddings[i]))
     return np.amax(L_values)
 
-#valuelist = [[0.5, 0.05], [0.5, 0.1], [0.1, 0.05], [0.1, 0.1]] # [beta, epsilon]
 regret_inf = np.zeros(M)
-#regret_true = np.zeros(M)
-#regret_estimated = np.zeros(M)
-#regret_transfer = np.zeros((4,M))
 
 # for print
-arm_info = np.zeros((M,6))
-lastpull = np.zeros((M,6)) #(M, numArms)
+arm_info = np.zeros((M,6)) #(M, numArms)
+lastpull = np.zeros((M,6)) 
 lastmean = np.zeros((M,6))
 
 trueLC_list = []
@@ -88,7 +85,7 @@ for m in range(M):
 colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'mediumorchid', 'rebeccapurple'] # 7
 
 
-with open(dir_name+ "/EmpiricalLipschitz.txt", "w") as f:
+with open(dir_name+ "/EmpiricalLipschitz_base.txt", "w") as f:
     for i in range(len(Empirical_Lipschitz)):
         f.write("\nepisode:{}, {}".format(i, Empirical_Lipschitz[i]))
 
