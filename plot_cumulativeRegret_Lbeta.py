@@ -72,8 +72,7 @@ with open(r"C:\Users\parke\bandit\checking\regret_transfer.txt") as f:
     plt.hist([x1, x2, x3, x4, x5], bins = int(180/5), color = colors, label=labels2)
 
     # Plot formatting
-    plt.legend()
-    plt.show()    
+    plt.legend() 
 
 #plt.hist(regret_difference, range=(-400,800), bins=10, rwidth=0.1, label=labels[i])
 
@@ -94,6 +93,7 @@ for i in range(len(X)):
     X1.append(X[i]+0.2)
     X2.append(X[i]-0.2)
 """
+labels2 = ['(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', '', 'max', 'inf']
 # for comparing difference value_histogram
 with open(r"C:\Users\parke\bandit\checking\regret_transfer.txt") as f:
     data = f.read().split()
@@ -131,7 +131,135 @@ with open(r"C:\Users\parke\bandit\checking\regret_transfer.txt") as f:
                     plotfor[i][3] += 1
                 elif regret_difference[i][m] > 500:
                     plotfor[i][4] += 1
-            plt.bar(X, plotfor[i], width=0.1, label=labels2)
+            plt.bar(X, plotfor[i], width=0.1, label=labels2[i])
     plt.xticks([0,1,2,3,4], ['r<-250', "-250<r<0", '0<r<250', '250<r<500', 'r>500'])
-    plt.legend()
-    plt.show()
+plt.legend()
+plt.savefig(filepath+'/bar', dpi=300)
+plt.savefig(filepath+'/bar.pdf', format='pdf', dpi=300) 
+
+labels2 = ['(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', '', 'max', 'inf']
+# for comparing difference value_histogram
+with open(r"C:\Users\parke\bandit\checking\regret_transfer.txt") as f:
+    data = f.read().split()
+    # for ture
+    regret_true = []
+    plt.figure()
+    for m in range(M):
+        regret_true.append(float(data[7*m+4][:-1]))
+
+    regret_difference = np.zeros((6,M))
+    plotfor = np.zeros((6,5))
+
+    for i in range(6):
+        X = []
+        if i < 3:
+            for j in range(5):
+                X.append(j-0.2+0.1*i)
+        elif i > 3:
+            for j in range(5):
+                X.append(j-0.2+0.1*(i-1))
+        if i != 3:
+            for m in range(M):
+                if data[7*m+(i+1)][-1] == ',':
+                    regret_difference[i][m] = (float(data[7*m+(i+1)][:-1])-regret_true[m])            
+                else:
+                    regret_difference[i][m] = (float(data[7*m+(i+1)])-regret_true[m])
+                
+                if regret_difference[i][m] < -250:
+                    plotfor[i][0] += 1
+                elif -250 <= regret_difference[i][m] < 0:
+                    plotfor[i][1] += 1
+                elif 0 <= regret_difference[i][m] < 250:
+                    plotfor[i][2] += 1    
+                elif 250 <= regret_difference[i][m] < 500:
+                    plotfor[i][3] += 1
+                elif regret_difference[i][m] > 500:
+                    plotfor[i][4] += 1
+            plt.bar(X, plotfor[i], width=0.1, label=labels2[i])
+    plt.xticks([0,1,2,3,4], [r'$r$<-250', r"-250<$r$<0", r'0<$r$<250', r'250<$r$<500', r'$r$>500'])
+plt.legend()
+plt.savefig(filepath+'/bar', dpi=300)
+plt.savefig(filepath+'/bar.pdf', format='pdf', dpi=300) 
+
+
+with open(r"C:\Users\parke\bandit\checking\regret_transfer.txt") as f:
+    data = f.read().split()
+    # for ture
+    regret_true = []
+    plt.figure()
+    for m in range(M):
+        regret_true.append(float(data[7*m+4][:-1]))
+
+    regret_difference = np.zeros((6,M))
+    plotfor = np.zeros((6,4))
+
+    for i in range(6):
+        X = []
+        if i < 3:
+            for j in range(4):
+                X.append(j-0.2+0.1*i)
+        elif i > 3:
+            for j in range(4):
+                X.append(j-0.2+0.1*(i-1))
+        if i != 3:
+            for m in range(M):
+                if data[7*m+(i+1)][-1] == ',':
+                    regret_difference[i][m] = (regret_true[m]/float(data[7*m+(i+1)][:-1]))            
+                else:
+                    regret_difference[i][m] = (regret_true[m]/float(data[7*m+(i+1)]))
+                
+                if regret_difference[i][m] < 0:
+                    plotfor[i][0] += 1
+                elif 0 <= regret_difference[i][m] < 1:
+                    plotfor[i][1] += 1
+                elif 1 <= regret_difference[i][m] < 2:
+                    plotfor[i][2] += 1    
+                elif regret_difference[i][m] > 2:
+                    plotfor[i][3] += 1
+            
+            plt.bar(X, plotfor[i], width=0.1, label=labels2[i])
+    plt.xticks([0,1,2,3,4], [r'$r$<0', r"0<$r$<1", r'1<$r$<2', r'$r$>2'])
+plt.legend()
+plt.savefig(filepath+'/ratio_bar', dpi=300)
+plt.savefig(filepath+'/ratio_bar.pdf', format='pdf', dpi=300) 
+
+with open(r"C:\Users\parke\bandit\checking\regret_transfer.txt") as f:
+    data = f.read().split()
+    # for ture
+    regret_true = []
+    plt.figure()
+    for m in range(M):
+        regret_true.append(float(data[7*m+4][:-1]))
+
+    regret_difference = np.zeros((6,M))
+    plotfor = np.zeros((6,4))
+
+    for i in range(6):
+        X = []
+        if i < 3:
+            for j in range(4):
+                X.append(j-0.2+0.1*i)
+        elif i > 3:
+            for j in range(4):
+                X.append(j-0.2+0.1*(i-1))
+        if i != 3:
+            for m in range(M):
+                if data[7*m+(i+1)][-1] == ',':
+                    regret_difference[i][m] = (regret_true[m]/float(data[7*m+(i+1)][:-1]))            
+                else:
+                    regret_difference[i][m] = (regret_true[m]/float(data[7*m+(i+1)]))
+                
+                if regret_difference[i][m] < 0:
+                    plotfor[i][0] += 1
+                elif 0 <= regret_difference[i][m] < 0.5:
+                    plotfor[i][1] += 1
+                elif 0.5 <= regret_difference[i][m] < 1:
+                    plotfor[i][2] += 1    
+                elif regret_difference[i][m] > 1:
+                    plotfor[i][3] += 1
+            
+            plt.bar(X, plotfor[i], width=0.1, label=labels2[i])
+    plt.xticks([0,1,2,3,4], [r'$r$<0', r"0<$r$<0.5", r'0.5<$r$<1', r'$r$>1'])
+plt.legend()
+plt.savefig(filepath+'/ratio_bar2', dpi=300)
+plt.savefig(filepath+'/ratio_bar2.pdf', format='pdf', dpi=300) 
