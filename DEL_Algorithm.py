@@ -253,18 +253,15 @@ class DEL_bandit(BasePolicy):
     def choice(self):
         """ Applies the OSSB procedure, it's quite complicated so see the original paper."""
         means = (self.rewards / self.pulls)
-        gap = 1/(1+log_plus(log_plus(self.t)))
+        gap = 1/(1+50*log_plus(log_plus(self.t)))
 
         count_undersample = 0
         zeta = np.zeros(self.nbArms)
         zeta_value = self.pulls/log_plus(self.t)
-        
+        # if i in np.where(means == max(means))[0]:
+    
         for i in range(self.nbArms):
-                if abs(max(means)-means[i])<=gap:
-                    means[i] = max(means)
-
-        for i in range(self.nbArms):
-            if i in np.where(means == max(means))[0]:
+            if i in np.where(abs(means-max(means))<=gap)[0]:
                 zeta[i] = np.inf
             else:
                 zeta[i] = zeta_value[i]
@@ -282,9 +279,9 @@ class DEL_bandit(BasePolicy):
         
         check_sum = np.zeros(self.nbArms)
         sum_cons = np.zeros(count_undersample)
-        for idx, i in enumerate(np.where(means != max(means))[0]):
+        for idx, i in enumerate(np.where(abs(means-max(means))>gap)[0]):
             nu_confus = get_confusing_bandit(i, LCvalue, means, gap)
-            for k in np.where(means != max(means))[0]:
+            for k in np.where(abs(means-max(means))>gap)[0]:
                 sum_cons[idx] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
                 check_sum[i] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
         self.zeta_info = check_sum
