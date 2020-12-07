@@ -253,7 +253,7 @@ class DEL_bandit(BasePolicy):
     def choice(self):
         """ Applies the OSSB procedure, it's quite complicated so see the original paper."""
         means = (self.rewards / self.pulls)
-        gap = 1/(1+50*log_plus(log_plus(self.t)))
+        gap = 1/(1+25*log_plus(log_plus(self.t)))
 
         count_undersample = 0
         zeta = np.zeros(self.nbArms)
@@ -332,7 +332,7 @@ class DEL_bandit(BasePolicy):
             values_c_x_mt2 = np.zeros(self.nbArms)
             for i in range(self.nbArms):
                 if i in np.where(means != max(means))[0]:
-                    values_c_x_mt2[i] = min((1+self.gamma)*values_c_x_mt[i], log_plus(self.t))
+                    values_c_x_mt2[i] = min((1+self.gamma)*values_c_x_mt[i], log_plus(self.t)*10)
                 else:
                     values_c_x_mt2[i] = log_plus(self.t)
             self.eta_compare = values_c_x_mt2.copy()
