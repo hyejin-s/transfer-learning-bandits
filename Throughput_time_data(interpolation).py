@@ -51,7 +51,7 @@ def solve_optimization_problem__classic(n, r, thetas): #thetas: throughput
 
     for i, theta in enumerate(thetas):
         if theta < theta_max:
-            values += (theta_max - theta) / (r[i]*klBino(n, theta_max/r[i], theta/r[i]))
+            values += (theta_max - theta) / (r[i]*klBino(n, theta/r[i], theta_max/r[i]))
 
     return values
 
@@ -148,8 +148,8 @@ for i in range(len(x_new)):
     # for j in range(8): # to change success probability
     #     thetas[i][j] = thetas[i][j] / rates[j]
     classic = solve_optimization_problem__classic(100, rates, thetas[i])
-    #lip = solve_optimization_problem__Lipschitz(i+1, rates, thetas[i], L=2.3) # 2.3 # 각 estimate 한 게 정확할 것 같음.
-    lip = solve_optimization_problem__Lipschitz(100, rates, thetas[i], L=estimate_Lipschitz_constant(thetas[i]))
+    lip = solve_optimization_problem__Lipschitz(100, rates, thetas[i], L=2.3) 
+    #lip = solve_optimization_problem__Lipschitz(100, rates, thetas[i], L=estimate_Lipschitz_constant(thetas[i]))
     classicList.append(classic)
     lipList.append(lip)
     minus.append(classic-lip)
