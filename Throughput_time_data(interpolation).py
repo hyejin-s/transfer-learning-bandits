@@ -51,7 +51,7 @@ def solve_optimization_problem__classic(n, r, thetas): #thetas: throughput
 
     for i, theta in enumerate(thetas):
         if theta < theta_max:
-            values += (theta_max-theta) / (r[i] *klBino(n, theta_max, theta))
+            values += (theta_max - theta) / (r[i]*klBino(n, theta_max/r[i], theta/r[i]))
 
     return values
 
@@ -60,12 +60,12 @@ def get_confusing_bandit(k, r, L, thetas):
     # values : \lambda_i^k (arm k,i \in K^{-})
     lambda_values = np.zeros_like(thetas)
     for i, theta in enumerate(thetas):
-        #lambda_values[i] = max(theta*r[i], theta_max*r[i]-L*abs(embeddings[k]-embeddings[i]))/r[i]
-        lambda_values[i] = min(max(theta, theta_max-L*abs(embeddings[k]-embeddings[i])), theta_max+L*abs(embeddings[k]-embeddings[i])) #???
+        lambda_values[i] = max(theta, theta_max-L*abs(embeddings[k]-embeddings[i])) / r[i]
+        #lambda_values[i] = min(max(theta, theta_max-L*abs(embeddings[k]-embeddings[i])), theta_max+L*abs(embeddings[k]-embeddings[i])) / r[i] #???
 
     return lambda_values
 
-def solve_optimization_problem__Lipschitz(n, r, thetas, L=-1):
+def solve_optimization_problem__Lipschitz(n, r, thetas, L):
     if L==-1:
         tol = 1e-12
     else:
@@ -77,15 +77,11 @@ def solve_optimization_problem__Lipschitz(n, r, thetas, L=-1):
     sub_arms = (np.nonzero(c))[0]
     opt_arms = (np.where(c==0))[0]
 
-    # for unknown Lipschitz Constant
-    if L==-1:
-        L = estimate_Lipschitz_constant(thetas)
-
     A_ub=np.zeros((sub_arms.size, sub_arms.size))
     for j, k in enumerate(sub_arms):
         nu = get_confusing_bandit(k, rates, L, thetas) # get /lambda^k
         for i, idx in enumerate(sub_arms):         # A_eq[j]=
-            A_ub[j][i] = r[i] * klBino(n, thetas[idx], nu[idx])
+            A_ub[j][i] = r[idx] * klBino(n, thetas[idx]/r[idx], nu[idx])
     A_ub = (-1)*A_ub
     b_ub = (-1)*np.ones_like(np.arange(sub_arms.size, dtype=int))
     delta = c[c!=0]
@@ -149,11 +145,11 @@ minus = []
 
 thetas = np.transpose(value_save)
 for i in range(len(x_new)):
-    for j in range(8): # to change success probability
-        thetas[i][j] = thetas[i][j] / rates[j]
-    classic = solve_optimization_problem__classic(i+1, rates, thetas[i])
-    lip = solve_optimization_problem__Lipschitz(i+1, rates, thetas[i], L=2.3) # 2.3 # 각 estimate 한 게 정확하지 않을까..
-    #lip = solve_optimization_problem__Lipschitz(i+1, rates, thetas[i], L=estimate_Lipschitz_constant(thetas[i]))
+    # for j in range(8): # to change success probability
+    #     thetas[i][j] = thetas[i][j] / rates[j]
+    classic = solve_optimization_problem__classic(100, rates, thetas[i])
+    #lip = solve_optimization_problem__Lipschitz(i+1, rates, thetas[i], L=2.3) # 2.3 # 각 estimate 한 게 정확할 것 같음.
+    lip = solve_optimization_problem__Lipschitz(100, rates, thetas[i], L=estimate_Lipschitz_constant(thetas[i]))
     classicList.append(classic)
     lipList.append(lip)
     minus.append(classic-lip)
@@ -161,7 +157,7 @@ for i in range(len(x_new)):
 plt.figure()
 plt.plot(x_new, classicList, label='classic')
 plt.plot(x_new, lipList, label='lip')
-plt.plot(x_new, minus, label='minus')
+# plt.plot(x_new, minus, label='minus')
 plt.legend()
 plt.xlim(0,300)
 plt.show()
