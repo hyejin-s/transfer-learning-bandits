@@ -4,7 +4,7 @@ from enum import Enum  # For the different phases
 import numpy as np
 from scipy.optimize import linprog
 from itertools import combinations
-from math import log
+from math import log, sqrt
 
 eps = 1e-15  #: Threshold value: everything in [0, 1] is truncated to [eps, 1 - eps]
 # Bernoulli KL-divergence
@@ -28,6 +28,9 @@ LCvalue = -1    # to print LC
 
 arms = np.array([0.1, 0.0005, 0.0005, 0.2005, 0.0005, 0.0005])
 embeddings = [0, 0.995, 0.996, 0.997, 0.998, 0.999]
+# arms = np.array([0.1, 0.8, 0.65, 0.11, 0.35, 0.77, 0.6, 0.64, 0.98, 0.1, 0.66, 0.15, 0.24, 0.22, 0.34, 0.58, 0.44, 0.55, 0.67, 0.2])
+# embeddings = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]
+
 #embeddings = [0, 0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 0.999, 1]
 #embeddings = [0, 0.99, 0.991, 0.992, 0.993, 0.994, 0.995, 0.996, 0.997, 0.998, 0.999, 1]
 #arms = np.array([0.1, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.2, 0.001]) # need to check suboptimal(position)
@@ -52,7 +55,7 @@ def get_confusing_bandit(k, L, thetas, gap):
         if L == np.inf:
             if k == i:
                 lambda_values[i] = theta_max
-        if theta_max-lambda_values[i] <= gap:
+        if (theta_max - lambda_values[i]) <= gap:
             lambda_values[i] = theta_max
     return lambda_values
 
@@ -242,7 +245,7 @@ class DEL_bandit(BasePolicy):
         super(DEL_bandit, self).startGame()
         self.counter_s_no_exploitation_phase = 0
         self.phase = Phase.initialisation
-        self.compare_info = np.zeros(3)
+        self.compare_info = np.zeros(4)
 
     def getReward(self, arm, reward):
         """ Give a reward: increase t, pulls, and update cumulated sum of rewards for that arm (normalized in [0, 1])."""
@@ -253,20 +256,14 @@ class DEL_bandit(BasePolicy):
     def choice(self):
         """ Applies the OSSB procedure, it's quite complicated so see the original paper."""
         means = (self.rewards / self.pulls)
-        gap = 1/(1+25*log_plus(log_plus(self.t)))
+        gap = 1/sqrt(self.t)
 
         count_undersample = 0
         zeta = np.zeros(self.nbArms)
         zeta_value = self.pulls/log_plus(self.t)
         # if i in np.where(means == max(means))[0]:
     
-        for i in range(self.nbArms):
-            if i in np.where(abs(means-max(means))<=gap)[0]:
-                zeta[i] = np.inf
-            else:
-                zeta[i] = zeta_value[i]
-                count_undersample += 1
-        
+        # For Lipschitz
         global LCvalue
         LCvalue = np.inf
         if 'L' in self._kwargs and self._kwargs['L'] == -1:
@@ -277,6 +274,13 @@ class DEL_bandit(BasePolicy):
             LCvalue = wantLC
         self.LC_value = LCvalue
         
+        for i in range(self.nbArms):
+            if i in np.where(abs(means-max(means))<=gap)[0]:
+                zeta[i] = np.inf
+            else:
+                zeta[i] = zeta_value[i]
+                count_undersample += 1
+
         check_sum = np.zeros(self.nbArms)
         sum_cons = np.zeros(count_undersample)
         for idx, i in enumerate(np.where(abs(means-max(means))>gap)[0]):
@@ -287,32 +291,34 @@ class DEL_bandit(BasePolicy):
         self.zeta_info = check_sum
         
         if np.any(self.pulls < 1):
+            self.compare_info[0] += 1
             return np.random.choice(np.nonzero(self.pulls < 1)[0])
 
         # Monotonize
-        # optimal_arm = np.where(means == np.max(means))[0]
-        elif np.all(self.pulls[np.where(means == np.max(means))[0]]<(log_plus(self.t)**2+1)):
-            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[np.where(means == np.max(means))[0]]))[0])
+        # optimal_arm = np.where(means == max(means))[0]
+        elif np.all(self.pulls[np.where(means == max(means))[0]]<((log_plus(self.t))**2+1)):
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == min(self.pulls[np.where(means == max(means))[0]]))[0])
+            self.compare_info[1] += 1
             return chosen_arm
 
         # Estimate       
         # underSampledArms = np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]
         elif (np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]).size > 0:
             self.phase = Phase.estimation
-            self.compare_info[0] += 1
-            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]]))[0])
+            self.compare_info[2] += 1
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == min(self.pulls[np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]]))[0])
             self.eta_solution = 1
             return chosen_arm   
 
         # Exploit
         elif np.all(sum_cons >= 1):
             self.phase = Phase.exploitation
-            self.compare_info[1] += 1
+            self.compare_info[3] += 1
             for i in range(self.nbArms):
                 if abs(max(means)-means[i])<=gap:
                     means[i] = max(means)
-            bestvalue_arm = np.where(means == np.max(means))[0]
-            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[bestvalue_arm]))[0])
+            bestvalue_arm = np.where(means == max(means))[0]
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == min(self.pulls[bestvalue_arm]))[0])
             self.eta_solution = 2
             return chosen_arm
 
@@ -339,10 +345,10 @@ class DEL_bandit(BasePolicy):
 
             # exploration          
             self.phase = Phase.exploration
-            self.compare_info[2] += 1
+            self.compare_info[4] += 1
             # most under-explored arm
             values = values_c_x_mt2 * log_plus(self.t) - self.pulls
-            chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
+            chosen_arm = np.random.choice(np.nonzero(values == max(values))[0])
             return chosen_arm
 
 
