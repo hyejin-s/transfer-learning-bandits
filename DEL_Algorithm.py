@@ -55,8 +55,8 @@ def get_confusing_bandit(k, L, thetas, gap):
         if L == np.inf:
             if k == i:
                 lambda_values[i] = theta_max
-        if (theta_max - lambda_values[i]) <= gap:
-            lambda_values[i] = theta_max
+        # if (theta_max - lambda_values[i]) <= gap:
+        #     lambda_values[i] = theta_max
     return lambda_values
 
 def solve_optimization_problem__Lipschitz(thetas, gap, L=-1):
@@ -179,7 +179,7 @@ class BasePolicy(object):
         self.old_mt = np.zeros(nbArms)
         self.eta_solution = np.zeros(nbArms)
         self.eta_compare = np.zeros(nbArms)
-        self.compare_info = np.zeros(3)
+        self.compare_info = np.zeros(5)
         self.LC_value = 0
 
     def __str__(self):
@@ -245,7 +245,7 @@ class DEL_bandit(BasePolicy):
         super(DEL_bandit, self).startGame()
         self.counter_s_no_exploitation_phase = 0
         self.phase = Phase.initialisation
-        self.compare_info = np.zeros(4)
+        self.compare_info = np.zeros(5)
 
     def getReward(self, arm, reward):
         """ Give a reward: increase t, pulls, and update cumulated sum of rewards for that arm (normalized in [0, 1])."""
@@ -256,14 +256,20 @@ class DEL_bandit(BasePolicy):
     def choice(self):
         """ Applies the OSSB procedure, it's quite complicated so see the original paper."""
         means = (self.rewards / self.pulls)
+        # gap = 1/(1+25*log_plus(log_plus(self.t)))
         gap = 1/sqrt(self.t)
-
         count_undersample = 0
         zeta = np.zeros(self.nbArms)
         zeta_value = self.pulls/log_plus(self.t)
         # if i in np.where(means == max(means))[0]:
     
-        # For Lipschitz
+        for i in range(self.nbArms):
+            if i in np.where(abs(means-max(means))<=gap)[0]:
+                zeta[i] = np.inf
+            else:
+                zeta[i] = zeta_value[i]
+                count_undersample += 1
+        
         global LCvalue
         LCvalue = np.inf
         if 'L' in self._kwargs and self._kwargs['L'] == -1:
@@ -274,20 +280,13 @@ class DEL_bandit(BasePolicy):
             LCvalue = wantLC
         self.LC_value = LCvalue
         
-        for i in range(self.nbArms):
-            if i in np.where(abs(means-max(means))<=gap)[0]:
-                zeta[i] = np.inf
-            else:
-                zeta[i] = zeta_value[i]
-                count_undersample += 1
-
         check_sum = np.zeros(self.nbArms)
         sum_cons = np.zeros(count_undersample)
         for idx, i in enumerate(np.where(abs(means-max(means))>gap)[0]):
             nu_confus = get_confusing_bandit(i, LCvalue, means, gap)
             for k in np.where(abs(means-max(means))>gap)[0]:
-                sum_cons[idx] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
-                check_sum[i] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma))
+                sum_cons[idx] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma/10))
+                check_sum[i] += klBern(means[k], nu_confus[k]) * (zeta[k] / (1 + self.gamma/10))
         self.zeta_info = check_sum
         
         if np.any(self.pulls < 1):
@@ -295,10 +294,10 @@ class DEL_bandit(BasePolicy):
             return np.random.choice(np.nonzero(self.pulls < 1)[0])
 
         # Monotonize
-        # optimal_arm = np.where(means == max(means))[0]
-        elif np.all(self.pulls[np.where(means == max(means))[0]]<((log_plus(self.t))**2+1)):
-            chosen_arm = np.random.choice(np.nonzero(self.pulls == min(self.pulls[np.where(means == max(means))[0]]))[0])
+        # optimal_arm = np.where(means == np.max(means))[0]
+        elif np.all(self.pulls[np.where(means == np.max(means))[0]]<(log_plus(self.t)**2+1)):
             self.compare_info[1] += 1
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[np.where(means == np.max(means))[0]]))[0])
             return chosen_arm
 
         # Estimate       
@@ -306,7 +305,7 @@ class DEL_bandit(BasePolicy):
         elif (np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]).size > 0:
             self.phase = Phase.estimation
             self.compare_info[2] += 1
-            chosen_arm = np.random.choice(np.nonzero(self.pulls == min(self.pulls[np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]]))[0])
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[np.where(self.pulls <= log_plus(self.t)/(1+log_plus(log_plus(self.t))))[0]]))[0])
             self.eta_solution = 1
             return chosen_arm   
 
@@ -317,8 +316,8 @@ class DEL_bandit(BasePolicy):
             for i in range(self.nbArms):
                 if abs(max(means)-means[i])<=gap:
                     means[i] = max(means)
-            bestvalue_arm = np.where(means == max(means))[0]
-            chosen_arm = np.random.choice(np.nonzero(self.pulls == min(self.pulls[bestvalue_arm]))[0])
+            bestvalue_arm = np.where(means == np.max(means))[0]
+            chosen_arm = np.random.choice(np.nonzero(self.pulls == np.min(self.pulls[bestvalue_arm]))[0])
             self.eta_solution = 2
             return chosen_arm
 
@@ -337,10 +336,10 @@ class DEL_bandit(BasePolicy):
    
             values_c_x_mt2 = np.zeros(self.nbArms)
             for i in range(self.nbArms):
-                if i in np.where(means != max(means))[0]:
-                    values_c_x_mt2[i] = min((1+self.gamma)*values_c_x_mt[i], log_plus(self.t)*10)
+                if i in np.where(means == max(means))[0]:
+                    values_c_x_mt2[i] = min(values_c_x_mt[i], log_plus(self.t))
                 else:
-                    values_c_x_mt2[i] = log_plus(self.t)
+                    values_c_x_mt2[i] = (1+self.gamma)*values_c_x_mt[i]
             self.eta_compare = values_c_x_mt2.copy()
 
             # exploration          
@@ -348,7 +347,7 @@ class DEL_bandit(BasePolicy):
             self.compare_info[4] += 1
             # most under-explored arm
             values = values_c_x_mt2 * log_plus(self.t) - self.pulls
-            chosen_arm = np.random.choice(np.nonzero(values == max(values))[0])
+            chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
             return chosen_arm
 
 
