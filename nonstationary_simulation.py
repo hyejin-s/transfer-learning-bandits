@@ -1,5 +1,5 @@
-name = ['\Dataset 0.csv','\Dataset 1.csv','\Dataset 2.csv','\Dataset 3.csv',
-        '\Dataset 4.csv','\Dataset 5.csv','\Dataset 6.csv','\Dataset 7.csv']
+name = ['/Dataset 0.csv','/Dataset 1.csv','/Dataset 2.csv','/Dataset 3.csv',
+        '/Dataset 4.csv','/Dataset 5.csv','/Dataset 6.csv','/Dataset 7.csv']
 
 from Bernolli import Bernoulli
 from evaluator_transferlearning import *
@@ -12,24 +12,27 @@ import os
 import numpy as np
 from scipy import interpolate 
 
-HORIZON=200
+HORIZON=10000
 REPETITIONS=1
-N_JOBS=40
+N_JOBS=10
 
 sliding_window=3
 
-M = 5 - sliding_window + 1 # the ordering of Transfer Learning
+M = 293 - sliding_window + 1 # the ordering of Transfer Learning
 
 
 # arm info
-value_save = np.zeros((8,5))
+value_save = np.zeros((8,293))
 for i in range(8):
-    data = np.loadtxt(r'C:\Users\parke\Google 드라이브\Cloud\1-research\sequential-transfer-learning\simulation-note\OptimalRateSampling_graph'+name[i], delimiter=',', dtype = np.float32) 
+    data = np.loadtxt(r'/home/phj/bandits/data'+name[i], delimiter=',', dtype = np.float32) 
     x_ori = data[:,0] 
     y_ori = data[:,1] 
     f1 = interpolate.interp1d(x_ori,y_ori) 
-    x_new = np.linspace(3,296,num=5,endpoint=True)
+    x_new = np.linspace(3,296,num=293,endpoint=True)
     value_save[i]=f1(x_new)/54
+    undervalue = np.where(value_save[i] < 0)[0]
+    for j in range(len(undervalue)):
+        value_save[i][undervalue[j]] = 0
 
 dir_name = "./non-stationary"
 if not os.path.exists(dir_name):
@@ -48,6 +51,10 @@ for i in range(len(embeddings)):
     for m in range(M):
         arm_info[m][i] = np.sum(value_save[i][m:m+sliding_window])/sliding_window
 
+with open(dir_name+ "/arm_info.txt", "w") as f:
+    for m in range(M):
+        f.write("\nepisode:{} ".format(m))
+        np.savetxt(f, arm_info[m], newline=", ", fmt='%1.3f')
 
 ######################################### def #########################################
 
@@ -60,7 +67,7 @@ def Lipschitz_beta(L_list, epsilon, beta, M_present):
 def com_Lipschitz_constant(thetas, embeddings):
     L_values = []
     for i in range(thetas.size-1):
-        L_values.append(abs(thetas[i+1]-thetas[i])/(embeddings[i+1]-embeddings[i]))
+        L_values.append(abs(thetas[i+1]-thetas[i])/abs(embeddings[i+1]-embeddings[i]))
 
     return np.amax(L_values)
     
@@ -69,7 +76,7 @@ def com_Lipschitz_constant(thetas, embeddings):
 #################### numpy for saving info ####################
 regret_transfer = np.zeros((nbPolicies, M)) 
 Empirical_Lipschitz = np.zeros((nbPolicies, M))  # store empirical Lipschitz constant every episode
-defalut_Lipschitz = np.zeros(5)
+defalut_Lipschitz = np.zeros(293)
 
 # for print
 lastpull = np.zeros((M, nbPolicies, numArms)) #(M, nbPolicies, numArms)
@@ -87,7 +94,6 @@ for m in range(M):
     evaluation = Evaluator(configuration)
     for envId, env in tqdm(enumerate(evaluation.envs), desc="Problems"):
         evaluation.startOneEnv(envId, env)
-
     # POLICIES[0] = \inf
     regret_transfer[0][m] = evaluation.getCumulatedRegret_LessAccurate(policyId=0)[HORIZON-1]
     defalut_Lipschitz[m] = com_Lipschitz_constant(evaluation.get_lastmeans()[0][0], embeddings)
@@ -98,6 +104,11 @@ for m in range(M):
 
 for m in range(M):
     Empirical_Lipschitz[0][m] = np.sum(defalut_Lipschitz[m:m+sliding_window])/sliding_window
+
+with open(dir_name+ "/Lipschitz_info.txt", "w") as f:
+    # for m in range(M):
+    #     f.write("\nepisode:{} ".format(m))
+    np.savetxt(f, Empirical_Lipschitz[0], newline=", ", fmt='%1.3f')
 
 #### for \beta Lipschitz constant information
 for i in range(len(valuelist)):
@@ -137,7 +148,7 @@ for m in range(M):
     for idx in range(len(POLICIES)):
         regret_transfer[idx+1][m] = evaluation.getCumulatedRegret_LessAccurate(policyId=idx)[HORIZON-1]
     for idx in range(len(POLICIES)):
-        Empirical_Lipschitz[idx][m] = com_Lipschitz_constant(evaluation.get_lastmeans()[idx][0], embeddings)
+        Empirical_Lipschitz[idx+1][m] = com_Lipschitz_constant(evaluation.get_lastmeans()[idx][0], embeddings)
 
     # self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
     for idx in range(len(POLICIES)):
@@ -151,7 +162,7 @@ labels = ['inf', '(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', 'true']
 def plotRegret(filepath):
     plt.figure()
     X = list(range(1, M+1))
-    for i in range(len(POLICIES)):
+    for i in range(len(POLICIES)+1):
         plt.plot(X, regret_transfer[i], label="{}".format(labels[i]), color=colors[i])
     plt.legend()
     plt.title("Total {} episode, {} horizon".format(M, HORIZON))
@@ -166,7 +177,7 @@ with open(dir_name+ "/EmpiricalLipschitz.txt", "w") as f:
 
 with open(dir_name+ "/regret_transfer.txt", "w") as f:
     for episode in range(M): 
-        f.write("\nepisode:{}, {}, {}, {}, {}".format(episode, regret_transfer[0, episode], regret_transfer[1, episode], regret_transfer[2, episode], regret_transfer[3, episode], regret_transfer[4, episode]))
+        f.write("\nepisode:{}, {}, {}, {}, {}, {}".format(episode, regret_transfer[0, episode], regret_transfer[1, episode], regret_transfer[2, episode], regret_transfer[3, episode], regret_transfer[4, episode]))
 
 #lastpull = np.zeros((M,7,10)) #(M, nbPolicies, numArms)
 with open(dir_name+ "/lastpull.txt", "w") as f:
@@ -190,6 +201,3 @@ with open(dir_name+ "/information.txt", "w") as f:
     f.write("\nembeddings: "+str(embeddings))
 
 plotRegret(dir_name)
-
-
-# Lipschitz Constant 변화
