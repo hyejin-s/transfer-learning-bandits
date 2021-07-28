@@ -12,7 +12,7 @@ import os
 import numpy as np
 from scipy import interpolate 
 
-HORIZON=10000
+HORIZON=10
 REPETITIONS=1
 N_JOBS=10
 
@@ -45,7 +45,7 @@ if not os.path.exists(dir_name):
 
 valuelist = [[0.1, 0.05], [0.3, 0.05], [0.5, 0.05]] # [beta, epsilon]
 Lbeta_info = np.zeros((len(valuelist), M))
-Lture_info = np.zeros(M)
+Ltrue_info = np.zeros(M)
 nbPolicies = 5
 numArms = 8
 
@@ -123,7 +123,6 @@ for i in range(len(valuelist)):
     for m in range(M):
         Empirical_list.append(Empirical_Lipschitz[0][m])
         Lbeta_info[i][m] = Lipschitz_beta(Empirical_list, epsilon, beta, m)
-        print(Lbeta_info)
 
 # POLICIES = [{"archtype":OSSB_DEL, "params":{}}, {"archtype":LipschitzOSSB_DEL, "params":{}}]   
 for m in range(M):
@@ -184,13 +183,13 @@ def plotLbeta(filepath):
         if i == 0: # inf
             plt.plot(X, Empirical_Lipschitz[0], label="{}".format(labels[i]), color=colors[i])
         elif i == len(POLICIES): # true
-            plt.plot(X, trueLC, label="{}".format(labels[i]), color=colors[i])
+            plt.plot(X, Ltrue_info, label="{}".format(labels[i]), color=colors[i])
         else:
             plt.plot(X, Lbeta_info[i], label="{}".format(labels[i]), color=colors[i])
     plt.legend()
     plt.title("Total {} episode, {} horizon".format(M, HORIZON))
-    plt.savefig(filepath+'/Regret', dpi=300)
-    plt.savefig(filepath+'/Regret.pdf', format='pdf', dpi=300) 
+    plt.savefig(filepath+'/Lbeta', dpi=300)
+    plt.savefig(filepath+'/Lbeta.pdf', format='pdf', dpi=300) 
 
 with open(dir_name+ "/EmpiricalLipschitz.txt", "w") as f:
     for i in range(len(Empirical_Lipschitz)):
