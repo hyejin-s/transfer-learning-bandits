@@ -185,7 +185,7 @@ def plotLbeta(filepath):
         elif i == len(POLICIES): # true
             plt.plot(X, Ltrue_info, label="{}".format(labels[i]), color=colors[i])
         else:
-            plt.plot(X, Lbeta_info[i], label="{}".format(labels[i]), color=colors[i])
+            plt.plot(X, Lbeta_info[i-1], label="{}".format(labels[i]), color=colors[i])
     plt.legend()
     plt.title("Total {} episode, {} horizon".format(M, HORIZON))
     plt.savefig(filepath+'/Lbeta', dpi=300)
