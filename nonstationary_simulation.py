@@ -29,10 +29,15 @@ for i in range(8):
     y_ori = data[:,1] 
     f1 = interpolate.interp1d(x_ori,y_ori) 
     x_new = np.linspace(3,296,num=293,endpoint=True)
-    value_save[i]=f1(x_new)/54
+    value_save[i]=f1(x_new)
     undervalue = np.where(value_save[i] < 0)[0]
     for j in range(len(undervalue)):
         value_save[i][undervalue[j]] = 0
+
+embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
+for i in range(8):
+    value_save[i] = value_save[i]/embeddings[i]   # success rate
+  
 
 dir_name = "./non-stationary"
 if not os.path.exists(dir_name):
@@ -44,7 +49,7 @@ Lture_info = np.zeros(M)
 nbPolicies = 5
 numArms = 8
 
-embeddings = [54/54, 48/54, 36/54, 24/54, 18/54, 12/54, 9/54, 6/54]
+embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
 
 arm_info = np.zeros((M, len(embeddings)))
 for i in range(len(embeddings)):
