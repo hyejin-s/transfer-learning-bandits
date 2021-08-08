@@ -1,5 +1,5 @@
-name = ['/Dataset 0.csv','/Dataset 1.csv','/Dataset 2.csv','/Dataset 3.csv',
-        '/Dataset 4.csv','/Dataset 5.csv','/Dataset 6.csv','/Dataset 7.csv']
+name = ['\Dataset 0.csv','\Dataset 1.csv','\Dataset 2.csv','\Dataset 3.csv',
+        '\Dataset 4.csv','\Dataset 5.csv','\Dataset 6.csv','\Dataset 7.csv']
 
 from Bernolli import Bernoulli
 from evaluator_transferlearning import *
@@ -12,44 +12,46 @@ import os
 import numpy as np
 from scipy import interpolate 
 
-HORIZON=10
+HORIZON=10000
 REPETITIONS=1
-N_JOBS=10
+N_JOBS=40
 
 sliding_window=3
-
-M = 293 - sliding_window + 1 # the ordering of Transfer Learning
-
+num = 293
+M = num - sliding_window + 1 # the ordering of Transfer Learning
 
 # arm info
 value_save = np.zeros((8,293))
 for i in range(8):
-    data = np.loadtxt(r'/home/phj/bandits/data'+name[i], delimiter=',', dtype = np.float32) 
+    data = np.loadtxt(r'C:\Users\parke\Google 드라이브\Cloud\1-research\sequential-transfer-learning\simulation-note\OptimalRateSampling_graph'+name[i], delimiter=',', dtype = np.float32) 
     x_ori = data[:,0] 
     y_ori = data[:,1] 
     f1 = interpolate.interp1d(x_ori,y_ori) 
-    x_new = np.linspace(3,296,num=293,endpoint=True)
-    value_save[i]=f1(x_new)
-    undervalue = np.where(value_save[i] < 0)[0]
+    x_new = np.linspace(3,296,num=num,endpoint=True)
+    value_save[i]=f1(x_new)/54
+    undervalue = np.where(value_save[i] < 0.05)[0]
     for j in range(len(undervalue)):
-        value_save[i][undervalue[j]] = 0
+        value_save[i][undervalue[j]] = 0.05
 
-embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
-for i in range(8):
-    value_save[i] = value_save[i]/embeddings[i]   # success rate
-  
+
+embeddings = [54/54, 48/54, 36/54, 24/54, 18/54, 12/54, 9/54, 6/54]
+
+
+# for i in range(8):
+#     value_save[i] = value_save[i]/(embeddings[i]*54)   # success rate
+
+
 
 dir_name = "./non-stationary"
 if not os.path.exists(dir_name):
     os.makedirs(dir_name)
 
-valuelist = [[0.1, 0.05], [0.3, 0.05], [0.5, 0.05]] # [beta, epsilon]
+valuelist = [[0.1, 0.1], [0.3, 0.1], [0.5, 0.1], [0.1, 0.05], [0.3, 0.05], [0.5, 0.05], [0.1, 0.5], [0.3, 0.5], [0.5, 0.5]] # [beta, epsilon]
 Lbeta_info = np.zeros((len(valuelist), M))
 Ltrue_info = np.zeros(M)
-nbPolicies = 5
-numArms = 8
 
-embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
+nbPolicies = 11
+numArms = 8
 
 arm_info = np.zeros((M, len(embeddings)))
 for i in range(len(embeddings)):
@@ -60,6 +62,7 @@ with open(dir_name+ "/arm_info.txt", "w") as f:
     for m in range(M):
         f.write("\nepisode:{} ".format(m))
         np.savetxt(f, arm_info[m], newline=", ", fmt='%1.3f')
+
 
 ######################################### def #########################################
 
@@ -72,16 +75,16 @@ def Lipschitz_beta(L_list, epsilon, beta, M_present):
 def com_Lipschitz_constant(thetas, embeddings):
     L_values = []
     for i in range(thetas.size-1):
-        L_values.append(abs(thetas[i+1]-thetas[i])/abs(embeddings[i+1]-embeddings[i]))
+        L_values.append(abs((thetas[i+1]-thetas[i])/(embeddings[i+1]-embeddings[i])))
 
     return np.amax(L_values)
-    
+
 ########################################################################################
 
 #################### numpy for saving info ####################
 regret_transfer = np.zeros((nbPolicies, M)) 
 Empirical_Lipschitz = np.zeros((nbPolicies, M))  # store empirical Lipschitz constant every episode
-defalut_Lipschitz = np.zeros(293)
+defalut_Lipschitz = np.zeros(num)
 
 # for print
 lastpull = np.zeros((M, nbPolicies, numArms)) #(M, nbPolicies, numArms)
@@ -99,21 +102,17 @@ for m in range(M):
     evaluation = Evaluator(configuration)
     for envId, env in tqdm(enumerate(evaluation.envs), desc="Problems"):
         evaluation.startOneEnv(envId, env)
+
     # POLICIES[0] = \inf
     regret_transfer[0][m] = evaluation.getCumulatedRegret_LessAccurate(policyId=0)[HORIZON-1]
     defalut_Lipschitz[m] = com_Lipschitz_constant(evaluation.get_lastmeans()[0][0], embeddings)
     # self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
-    lastpull[0][0] = evaluation.getLastPulls()[0, :, 0]
-    lastmean[0][0] = evaluation.get_lastmeans()[0][0]
+    lastpull[m][0] = evaluation.getLastPulls()[0, :, 0]
+    lastmean[m][0] = evaluation.get_lastmeans()[0][0]
     #evaluation.estimatedLipschitzdata(filepath=dir_name)
 
 for m in range(M):
     Empirical_Lipschitz[0][m] = np.sum(defalut_Lipschitz[m:m+sliding_window])/sliding_window
-
-with open(dir_name+ "/Lipschitz_info.txt", "w") as f:
-    # for m in range(M):
-    #     f.write("\nepisode:{} ".format(m))
-    np.savetxt(f, Empirical_Lipschitz[0], newline=", ", fmt='%1.3f')
 
 #### for \beta Lipschitz constant information
 for i in range(len(valuelist)):
@@ -154,7 +153,7 @@ for m in range(M):
     for idx in range(len(POLICIES)):
         regret_transfer[idx+1][m] = evaluation.getCumulatedRegret_LessAccurate(policyId=idx)[HORIZON-1]
     for idx in range(len(POLICIES)):
-        Empirical_Lipschitz[idx+1][m] = com_Lipschitz_constant(evaluation.get_lastmeans()[idx][0], embeddings)
+        Empirical_Lipschitz[idx][m] = com_Lipschitz_constant(evaluation.get_lastmeans()[idx][0], embeddings)
 
     # self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
     for idx in range(len(POLICIES)):
@@ -163,9 +162,8 @@ for m in range(M):
         lastmean[m][idx+1] = evaluation.get_lastmeans()[idx][0]
     #evaluation.estimatedLipschitzdata(filepath=dir_name)
 
-colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'mediumorchid', 'rebeccapurple'] # 7
-labels = ['inf', '(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', 'true']
-
+colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'mediumorchid', 'rebeccapurple', 'navajowhite', 'lavender', 'darkgrey', 'royalblue'] # 7
+labels = ['inf', '(0.1, 0.1)', '(0.3, 0.1)', '(0.5, 0.1)', '(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', '(0.1, 0.5)', '(0.3, 0.5)', '(0.5, 0.5)', 'true']
 def plotRegret(filepath):
     plt.figure()
     X = list(range(1, M+1))
@@ -176,21 +174,6 @@ def plotRegret(filepath):
     plt.savefig(filepath+'/Regret', dpi=300)
     plt.savefig(filepath+'/Regret.pdf', format='pdf', dpi=300) 
 
-def plotLbeta(filepath):
-    plt.figure()
-    X = list(range(1, M+1))
-    for i in range(len(POLICIES)+1):
-        if i == 0: # inf
-            plt.plot(X, Empirical_Lipschitz[0], label="{}".format(labels[i]), color=colors[i])
-        elif i == len(POLICIES): # true
-            plt.plot(X, Ltrue_info, label="{}".format(labels[i]), color=colors[i])
-        else:
-            plt.plot(X, Lbeta_info[i-1], label="{}".format(labels[i]), color=colors[i])
-    plt.legend()
-    plt.title("Total {} episode, {} horizon".format(M, HORIZON))
-    plt.savefig(filepath+'/Lbeta', dpi=300)
-    plt.savefig(filepath+'/Lbeta.pdf', format='pdf', dpi=300) 
-
 with open(dir_name+ "/EmpiricalLipschitz.txt", "w") as f:
     for i in range(len(Empirical_Lipschitz)):
         f.write("\n{}".format(i))
@@ -199,20 +182,22 @@ with open(dir_name+ "/EmpiricalLipschitz.txt", "w") as f:
 
 with open(dir_name+ "/regret_transfer.txt", "w") as f:
     for episode in range(M): 
-        f.write("\nepisode:{}, {}, {}, {}, {}, {}".format(episode, regret_transfer[0, episode], regret_transfer[1, episode], regret_transfer[2, episode], regret_transfer[3, episode], regret_transfer[4, episode]))
+        f.write("\nepisode:{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}".format(episode, regret_transfer[0, episode], regret_transfer[1, episode], 
+        regret_transfer[2, episode], regret_transfer[3, episode], regret_transfer[4, episode], regret_transfer[5, episode], regret_transfer[6, episode]
+        , regret_transfer[7, episode], regret_transfer[8, episode], regret_transfer[9, episode], regret_transfer[10, episode]))
 
 #lastpull = np.zeros((M,7,10)) #(M, nbPolicies, numArms)
 with open(dir_name+ "/lastpull.txt", "w") as f:
     for m in range(M):
         f.write("\nepisode:{}".format(m))
-        for policyId in range(5):
+        for policyId in range(nbPolicies):
             f.write("\npolicy:{}\n".format(policyId))
             np.savetxt(f, lastpull[m][policyId].astype(int), fmt='%i', newline=", ")
 
 with open(dir_name+ "/lastmean.txt", "w") as f:
     for m in range(M):
         f.write("\nepisode:{}".format(m))
-        for policyId in range(5):
+        for policyId in range(nbPolicies):
             f.write("\npolicy:{}\n".format(policyId))
             np.savetxt(f, lastmean[m][policyId], newline=", ", fmt='%1.3f')
 
@@ -222,6 +207,22 @@ with open(dir_name+ "/information.txt", "w") as f:
     f.write("\n(beta, epsilon): " + str(valuelist))
     f.write("\nembeddings: "+str(embeddings))
 
+
+def plotLbeta(filepath):
+    plt.figure()
+    X = list(range(1, M+1))
+    for i in range(len(POLICIES)+1):
+        if i == 0: # inf
+            # plt.plot(X, Empirical_Lipschitz[0], label="{}".format(labels[i]), color=colors[i])
+            pass
+        elif i == len(POLICIES): # true
+            plt.plot(X, Ltrue_info, label="{}".format(labels[i]), color=colors[i])
+        else:
+            plt.plot(X, Lbeta_info[i-1], label="{}".format(labels[i]), color=colors[i])
+    plt.legend()
+    plt.title("Total {} episode, {} horizon".format(M, HORIZON))
+    plt.savefig(filepath+'/Lbeta', dpi=300)
+    plt.savefig(filepath+'/Lbeta.pdf', format='pdf', dpi=300) 
+
 plotRegret(dir_name)
 plotLbeta(dir_name)
-
