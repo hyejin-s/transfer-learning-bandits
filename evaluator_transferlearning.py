@@ -25,7 +25,8 @@ from SMPyBandits.Environment.usetqdm import USE_TQDM, tqdm
 from SMPyBandits.Environment.plotsettings import BBOX_INCHES, signature, maximizeWindow, palette, makemarkers, add_percent_formatter, legend, show_and_save, nrows_ncols, violin_or_box_plot, adjust_xticks_subplots, table_to_latex
 from SMPyBandits.Environment.sortedDistance import weightedDistance, manhattan, kendalltau, spearmanr, gestalt, meanDistance, sortedDistance
 # Local imports, objects and functions
-from SMPyBandits.Environment.MAB import MAB, MarkovianMAB, ChangingAtEachRepMAB, NonStationaryMAB, PieceWiseStationaryMAB, IncreasingMAB
+# from SMPyBandits.Environment.MAB import MarkovianMAB, ChangingAtEachRepMAB, NonStationaryMAB, PieceWiseStationaryMAB, IncreasingMAB
+from MAB import *
 from Result import *
 from SMPyBandits.Environment.memory_consumption import getCurrentMemory, sizeof_fmt
 
@@ -115,6 +116,7 @@ class Evaluator(object):
 
         # Internal vectorial memory
         self.rewards = np.zeros((self.nbPolicies, len(self.envs), self.horizon))  #: For each env, history of rewards, ie accumulated rewards
+        self.regretRewards = np.zeros((self.nbPolicies, len(self.envs), self.horizon))  #: For each env, history of rewards, ie accumulated rewards
         self.rewards_mean = np.zeros((self.nbPolicies, len(self.envs), self.repetitions, self.horizon))
         self.lastCumRewards = np.zeros((self.nbPolicies, len(self.envs), self.repetitions))  #: For each env, last accumulated rewards, to compute variance and histogram of whole regret R_T
         self.minCumRewards = np.full((self.nbPolicies, len(self.envs), self.horizon), +np.inf)  #: For each env, history of minimum of rewards, to compute amplitude (+- STD)
@@ -248,6 +250,7 @@ class Evaluator(object):
         def store(r, policyId, repeatId):
             """ Store the result of the #repeatId experiment, for the #policyId policy."""
             self.rewards[policyId, envId, :] += r.rewards
+            self.regretRewards[policyId, envId, :] += r.regretRewards
             self.rewards_mean[policyId, envId, repeatId, :] += r.rewards
             self.lastCumRewards[policyId, envId, repeatId] = np.sum(r.rewards)
 
@@ -271,7 +274,7 @@ class Evaluator(object):
                 self.estimatedLipschitz[envId][repeatId] = r.estimatedLC
             self.etaSolution[envId][policyId][repeatId] = r.eta_Solution
             self.etaCompare[envId][policyId][repeatId] = r.eta_Compare
-            self.compareInfo[envId][policyId][repeatId] = r.compare_Info
+            # self.compareInfo[envId][policyId][repeatId] = r.compare_Info
             for armId in range(env.nbArms):
                 for t in range(self.horizon):
                     if r.choices[t] == armId:
@@ -293,7 +296,24 @@ class Evaluator(object):
                     else:
                         if t != 0:
                             self.cumpull[envId][policyId, repeatId, armId, t] = self.cumpull[envId][policyId, repeatId, armId, t-1]
-
+        
+        # Start for one repetition
+        for repeatId in range(self.repetitions):
+            if self.useJoblib:
+                seeds = np.random.randint(low=0, high=100*self.nbPolicies, size=self.nbPolicies)
+                policyIdout = 0
+                for r in Parallel(n_jobs=self.cfg['n_jobs'], pre_dispatch='3*n_jobs', verbose=self.cfg['verbosity'])(
+                    delayed(delayed_play)(env, policy, self.horizon, random_shuffle=self.random_shuffle, random_invert=self.random_invert, nb_break_points=self.nb_break_points, allrewards=allrewards, seed=seeds[policyId], repeatId=repeatId, useJoblib=self.useJoblib)
+                    for policyId, policy in tqdm(enumerate(self.policies), desc="Policy||")
+                ):
+                    #print("\n\n\n- Evaluating policy #{}/{}: {} ...".format(policyIdout + 1, self.nbPolicies, self.policies[policyIdout]))
+                    store(r, policyIdout, repeatId)
+                    policyIdout += 1
+            else:
+                for policyId, policy in tqdm(enumerate(self.policies), desc="Policy"):
+                    r = delayed_play(env, policy, self.horizon, random_shuffle=self.random_shuffle, random_invert=self.random_invert, nb_break_points=self.nb_break_points, allrewards=allrewards, repeatId=repeatId, useJoblib=self.useJoblib)
+                    store(r, policyId, repeatId)
+        """
         # Start for all policies
         for policyId, policy in enumerate(self.policies):
             print("\n\n\n- Evaluating policy #{}/{}: {} ...".format(policyId + 1, self.nbPolicies, policy))
@@ -310,6 +330,7 @@ class Evaluator(object):
                 for repeatId in tqdm(range(self.repetitions), desc="Repeat"):
                     r = delayed_play(env, policy, self.horizon, random_shuffle=self.random_shuffle, random_invert=self.random_invert, nb_break_points=self.nb_break_points, allrewards=allrewards, repeatId=repeatId, useJoblib=self.useJoblib)
                     store(r, policyId, repeatId)
+        """
 
     # --- Save to disk methods
 
@@ -417,6 +438,10 @@ class Evaluator(object):
         """Extract mean rewards."""
         return self.rewards[policyId, envId, :] / float(self.repetitions)
 
+    def getRegretRewards(self, policyId, envId=0):
+        """Extract mean rewards."""
+        return self.regretRewards[policyId, envId, :] / float(self.repetitions)
+
     def getAverageWeightedSelections(self, policyId, envId=0):
         """Extract weighted count of selections."""
         weighted_selections = np.zeros(self.horizon)
@@ -437,6 +462,10 @@ class Evaluator(object):
     def getCumulatedRegret_LessAccurate(self, policyId, envId=0):
         """Compute cumulative regret, based on accumulated rewards."""
         return np.cumsum(self.envs[envId].get_maxArm(self.horizon) - self.getRewards(policyId, envId))
+
+    def getRewardCumulatedRegret_LessAccurate(self, policyId, envId=0):
+        """Compute cumulative regret, based on accumulated rewards."""
+        return np.cumsum(self.envs[envId].get_maxArmReward(self.horizon) - self.getRegretRewards(policyId, envId))
 
     def getCumulatedRegret_MoreAccurate(self, policyId, envId=0):
         """Compute cumulative regret, based on counts of selections and not actual rewards."""
@@ -550,6 +579,11 @@ class Evaluator(object):
         means = [ np.mean(number_of_cp_detections) for number_of_cp_detections in all_number_of_cp_detections ]
         stds  = [ np.std(number_of_cp_detections) for number_of_cp_detections in all_number_of_cp_detections ]
         return means, stds, all_number_of_cp_detections
+    
+    # self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
+    def getLastPulls(self, envId=0):
+        return self.lastPulls[envId]
+    
 
     # --- Plotting methods
 
@@ -1177,6 +1211,13 @@ class Evaluator(object):
         plt.savefig(filepath+'/ConditionalExpectation_split', dpi=300)   
       
         return fig    
+    def estimatedLipschitzdata(self, filepath, envId=0):
+        # estimated Lipschitz Constant
+        with open(filepath+ "/estimated_Lipschitz_Constant.txt", "w") as f:
+            for t in range(self.horizon):
+                #if t % 1000 == 1:
+                f.write('\nt={}, '.format(t))
+                f.write(str(self.estimatedLipschitz[envId][0][t]))
     
     def savedata(self, filepath, envId=0, moreAccurate=True):
         # information (arms, embeddings, repetitions, epsilon, GAMMA)
@@ -1659,7 +1700,7 @@ def delayed_play(env, policy, horizon,
         
         result.eta_Solution[t] = policy.eta_solution
         result.eta_Compare[t] = policy.eta_compare
-        result.compare_Info[t] = policy.compare_info
+        # result.compare_Info[t] = policy.compare_info
 
 
         # 2. A random reward is drawn, from this arm at this time
@@ -1670,6 +1711,7 @@ def delayed_play(env, policy, horizon,
 
         # 3. The policy sees the reward
         policy.getReward(choice, reward)
+        policy.getRegretReward(choice, reward)
 
         # 4. Finally we store the results
         result.store(t, choice, reward)
