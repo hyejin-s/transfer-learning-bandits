@@ -1,5 +1,5 @@
-name = ['\Dataset 0.csv','\Dataset 1.csv','\Dataset 2.csv','\Dataset 3.csv',
-        '\Dataset 4.csv','\Dataset 5.csv','\Dataset 6.csv','\Dataset 7.csv']
+name = ['/Dataset 0.csv','/Dataset 1.csv','/Dataset 2.csv','/Dataset 3.csv',
+        '/Dataset 4.csv','/Dataset 5.csv','/Dataset 6.csv','/Dataset 7.csv']
 
 from Bernolli import Bernoulli
 from evaluator_transferlearning import *
@@ -12,41 +12,39 @@ import os
 import numpy as np
 from scipy import interpolate 
 
-HORIZON=10000
+HORIZON=5000
 REPETITIONS=1
 N_JOBS=40
 
-sliding_window=3
+sliding_window=5
 num = 293
 M = num - sliding_window + 1 # the ordering of Transfer Learning
 
 # arm info
-value_save = np.zeros((8,293))
+value_save = np.zeros((8,num))
 for i in range(8):
-    data = np.loadtxt(r'C:\Users\parke\Google 드라이브\Cloud\1-research\sequential-transfer-learning\simulation-note\OptimalRateSampling_graph'+name[i], delimiter=',', dtype = np.float32) 
+    data = np.loadtxt(r'/home/phj/bandits/data'+name[i], delimiter=',', dtype = np.float32)     
     x_ori = data[:,0] 
     y_ori = data[:,1] 
     f1 = interpolate.interp1d(x_ori,y_ori) 
     x_new = np.linspace(3,296,num=num,endpoint=True)
-    value_save[i]=f1(x_new)/54
-    undervalue = np.where(value_save[i] < 0.05)[0]
+    value_save[i]=f1(x_new)
+    undervalue = np.where(value_save[i] < 0)[0]
     for j in range(len(undervalue)):
-        value_save[i][undervalue[j]] = 0.05
+        value_save[i][undervalue[j]] = 0.01
 
 
-embeddings = [54/54, 48/54, 36/54, 24/54, 18/54, 12/54, 9/54, 6/54]
+embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
 
-
-# for i in range(8):
-#     value_save[i] = value_save[i]/(embeddings[i]*54)   # success rate
-
+for i in range(8):
+    value_save[i] = value_save[i]/embeddings[i]   # success rate
 
 
 dir_name = "./non-stationary"
 if not os.path.exists(dir_name):
     os.makedirs(dir_name)
 
-valuelist = [[0.1, 0.1], [0.3, 0.1], [0.5, 0.1], [0.1, 0.05], [0.3, 0.05], [0.5, 0.05], [0.1, 0.5], [0.3, 0.5], [0.5, 0.5]] # [beta, epsilon]
+valuelist = [[0.1, 0.1], [0.3, 0.1], [0.5, 0.1], [0.1, 0.05], [0.3, 0.05], [0.5, 0.05], [0.1, 0.01], [0.3, 0.01], [0.5, 0.01]] # [beta, epsilon]
 Lbeta_info = np.zeros((len(valuelist), M))
 Ltrue_info = np.zeros(M)
 
@@ -62,6 +60,14 @@ with open(dir_name+ "/arm_info.txt", "w") as f:
     for m in range(M):
         f.write("\nepisode:{} ".format(m))
         np.savetxt(f, arm_info[m], newline=", ", fmt='%1.3f')
+        
+with open(dir_name+ "/reward_info.txt", "w") as f:
+    for m in range(M):
+        f.write("\nepisode:{} ".format(m))
+        for i in range(numArms):
+            f.write("{}, ".format(arm_info[m][i]*embeddings[i]))
+        f.write("\\")
+
 
 
 ######################################### def #########################################
@@ -104,7 +110,7 @@ for m in range(M):
         evaluation.startOneEnv(envId, env)
 
     # POLICIES[0] = \inf
-    regret_transfer[0][m] = evaluation.getCumulatedRegret_LessAccurate(policyId=0)[HORIZON-1]
+    regret_transfer[0][m] = evaluation.getRewardCumulatedRegret_LessAccurate(policyId=0)[HORIZON-1]
     defalut_Lipschitz[m] = com_Lipschitz_constant(evaluation.get_lastmeans()[0][0], embeddings)
     # self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
     lastpull[m][0] = evaluation.getLastPulls()[0, :, 0]
@@ -151,7 +157,7 @@ for m in range(M):
     for envId, env in tqdm(enumerate(evaluation.envs), desc="Problems"):
         evaluation.startOneEnv(envId, env)
     for idx in range(len(POLICIES)):
-        regret_transfer[idx+1][m] = evaluation.getCumulatedRegret_LessAccurate(policyId=idx)[HORIZON-1]
+        regret_transfer[idx+1][m] = evaluation.getRewardCumulatedRegret_LessAccurate(policyId=idx)[HORIZON-1]
     for idx in range(len(POLICIES)):
         Empirical_Lipschitz[idx][m] = com_Lipschitz_constant(evaluation.get_lastmeans()[idx][0], embeddings)
 
@@ -162,8 +168,8 @@ for m in range(M):
         lastmean[m][idx+1] = evaluation.get_lastmeans()[idx][0]
     #evaluation.estimatedLipschitzdata(filepath=dir_name)
 
-colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'mediumorchid', 'rebeccapurple', 'navajowhite', 'lavender', 'darkgrey', 'royalblue'] # 7
-labels = ['inf', '(0.1, 0.1)', '(0.3, 0.1)', '(0.5, 0.1)', '(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', '(0.1, 0.5)', '(0.3, 0.5)', '(0.5, 0.5)', 'true']
+colors = ['tomato', 'limegreen', 'deepskyblue', 'crimson', 'pink', 'mediumorchid', 'rebeccapurple', 'navajowhite', 'lavender', 'darkgrey', 'royalblue'] # 11
+labels = ['inf', '(0.1, 0.1)', '(0.3, 0.1)', '(0.5, 0.1)', '(0.1, 0.05)', '(0.3, 0.05)', '(0.5, 0.05)', '(0.1, 0.01)', '(0.3, 0.01)', '(0.5, 0.01)', 'true']
 def plotRegret(filepath):
     plt.figure()
     X = list(range(1, M+1))
