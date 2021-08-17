@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """ :class:`MAB`, :class:`MarkovianMAB`, :class:`ChangingAtEachRepMAB`, :class:`IncreasingMAB`, :class:`PieceWiseStationaryMAB` and :class:`NonStationaryMAB` classes to wrap the arms of some Multi-Armed Bandit problems.
 Such class has to have *at least* these methods:
@@ -27,10 +26,12 @@ except ImportError as e:
 
 # Local imports
 try:
-    from .plotsettings import signature, wraptext, wraplatex, palette, makemarkers, legend, show_and_save
+    from SMPyBandits.Environment.plotsettings import signature, wraptext, wraplatex, palette, makemarkers, legend, show_and_save
 except ImportError:
     from plotsettings import signature, wraptext, wraplatex, palette, makemarkers, legend, show_and_save
 
+
+embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
 
 class MAB(object):
     """ Basic Multi-Armed Bandit problem, for stochastic and i.i.d. arms.
@@ -92,6 +93,17 @@ class MAB(object):
         # Print lower bound and HOI factor
         print("\nThis MAB problem has: \n - a [Lai & Robbins] complexity constant C(mu) = {:.3g} ... \n - a Optimal Arm Identification factor H_OI(mu) = {:.2%} ...".format(self.lowerbound(), self.hoifactor()))  # DEBUG
         print(" - with 'arms' represented as:", self.reprarms(1, latex=True))  # DEBUG
+        # self.rateReward = np.array([arm.mean * embeddings[arm] for arm in self.arms])
+        self.rateReward = np.zeros(len(self.arms))
+        for i in range(len(self.arms)):
+            self.rateReward[i] = self.means[i] * embeddings[i]
+            # self.rateReward[i] = self.means[i] * embeddings[i] / 54
+        print(" - with 'rateReward' =", self.rateReward)
+        self.maxArmReward = np.max(self.rateReward)  #: Max mean of arms
+        print(" - with 'maxRewardArm' =", self.maxArmReward)  # DEBUG
+        self.minArmReward = np.min(self.rateReward)  #: Min mean of arms
+        print(" - with 'minRewardArm' =", self.minArmReward)  # DEBUG
+
 
     def new_order_of_arm(self, arms):
         """ Feed a new order of the arms to the environment.
@@ -194,6 +206,13 @@ class MAB(object):
         - It is a vector of length horizon.
         """
         return np.full(horizon, self.maxArm)
+        # return self.maxArm  # XXX Nope, it's not a constant!
+    
+    def get_maxArmReward(self, horizon=None):
+        """Return the vector of max mean of the arms.
+        - It is a vector of length horizon.
+        """
+        return np.full(horizon, self.maxArmReward)
         # return self.maxArm  # XXX Nope, it's not a constant!
 
     def get_maxArms(self, M=1, horizon=None):
