@@ -7,6 +7,7 @@ __version__ = "0.9"
 
 import numpy as np
 
+embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
 
 class Result(object):
     """ Result accumulators."""
@@ -18,6 +19,7 @@ class Result(object):
         # self.delta_t_save = delta_t_save  #: Sample rate for saving.
         self.choices = np.zeros(horizon, dtype=int)  #: Store all the choices.
         self.rewards = np.zeros(horizon)  #: Store all the rewards, to compute the mean.
+        self.regretRewards = np.zeros(horizon)
         self.pulls = np.zeros(nbArms, dtype=int)  #: Store the pulls.
         if means is not None:
             indexes_bestarm = np.nonzero(np.isclose(means, np.max(means)))[0]
@@ -32,12 +34,13 @@ class Result(object):
         self.eta_Solution = np.zeros((horizon, nbArms))
         self.eta_Compare = np.zeros((horizon, nbArms))
         self.zeta_Info = np.zeros((horizon, nbArms))
-        self.compare_Info = np.zeros((horizon, 3))
+        self.compare_Info = np.zeros((horizon, 5))
 
     def store(self, time, choice, reward):
         """ Store results."""
         self.choices[time] = choice
         self.rewards[time] = reward
+        self.regretRewards[time] = reward * embeddings[choice]
         self.pulls[choice] += 1
 
     def change_in_arms(self, time, indexes_bestarm):
