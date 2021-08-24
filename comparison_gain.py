@@ -82,8 +82,8 @@ def solve_optimization_problem__classic(mu, thetas):
     for i, mu_value in enumerate(mu):
         if mu_value < mu_max: # sub-optimal arms
             # values += (theta_max - thetas[i]) / klBern(thetas[i], mu_max/embeddings[i])
-            # values += (mu_max - mu[i]) / (klBern(thetas[i], mu_max/embeddings[i]))
-            values += (mu_max - mu[i]) / klBern(thetas[i], mu_max/embeddings[i])
+            values += (mu_max - mu[i]) / (klBern(thetas[i], mu_max/embeddings[i]))
+            # values += (mu_max - mu[i]) / (embeddings[i]*klBern(thetas[i], mu_max/embeddings[i]))
     return values
 
 def get_confusing_bandit(j, L, mu, thetas, n): 
@@ -129,11 +129,11 @@ def solve_optimization_problem__Lipschitz(mu, thetas, L, n): # theta: n == 0, mu
     for j, k in enumerate(sub_arms):
         nu = get_confusing_bandit(k, L, mu, thetas, n)# get /lambda^k
         for i, idx in enumerate(sub_arms):         # A_eq[j]=
-            # A_ub[j][i] = klBern(thetas[idx], nu[idx])
-            if n == 0:
-                A_ub[j][i] = klBern(thetas[idx], nu[idx])
-            else:
-                A_ub[j][i] = embeddings[idx] * klBern(thetas[idx], nu[idx])    
+            A_ub[j][i] = klBern(thetas[idx], nu[idx])
+            # if n == 0:
+                # A_ub[j][i] = klBern(thetas[idx], nu[idx])
+            # else:
+                # A_ub[j][i] = embeddings[idx] * klBern(thetas[idx], nu[idx])    
     A_ub = (-1)*A_ub
     b_ub = (-1)*np.ones_like(np.arange(sub_arms.size, dtype=int))
     delta = c[c!=0]
@@ -206,7 +206,7 @@ def solve_optimization_problem__Lipschitz_d(mu, thetas, d, n):
             if n == 0:
                 A_ub[j][i] = klBern(thetas[idx], nu[idx])
             else:
-                A_ub[j][i] = klBern(thetas[idx], nu[idx])    
+                A_ub[j][i] = embeddings[idx] * klBern(thetas[idx], nu[idx])    
 
     A_ub = (-1)*A_ub
     b_ub = (-1)*np.ones_like(np.arange(sub_arms.size, dtype=int))
