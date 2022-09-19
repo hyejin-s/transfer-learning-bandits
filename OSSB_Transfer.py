@@ -324,8 +324,6 @@ class OSSB_DEL(BasePolicy):
             chosen_arm = np.random.choice(np.nonzero(values == np.max(values))[0])
             return chosen_arm
 
-
-
 class LipschitzOSSB_DEL(OSSB_DEL):
     def __init__(self, nbArms, gamma=GAMMA, L=-1, **kwargs):
         kwargs.update({'L': L})

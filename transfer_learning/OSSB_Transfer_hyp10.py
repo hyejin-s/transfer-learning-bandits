@@ -24,11 +24,10 @@ Phase = Enum('Phase', ['initialisation', 'exploitation', 'estimation', 'explorat
 GAMMA = 0.001
 EPSILON = 1
 
-LCvalue = -1    # to print LC
+# to print LC
+LCvalue = -1
 betaLC = -1
 trueLC = -1
-
-from GenerativeModel import embeddings
 
 def estimate_Lipschitz_constant(thetas):
     L_values = []

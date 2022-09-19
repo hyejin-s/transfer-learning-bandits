@@ -2,7 +2,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-
 filepath = r"C:\Users\parke\last_data"
 
 from collections import defaultdict
