@@ -57,7 +57,7 @@ regret_transfer = np.zeros((4,M))
 arm_info = np.zeros((M,10))
 beta_info = np.zeros((4,M))
 com_info = np.zeros((4,M,2))
-trueLC_list = []
+trueLC_list = [] 
 lastpull = np.zeros((M,7,10)) #(M, nbPolicies, numArms)
 
 ##### Transfer Learning #####

@@ -1,7 +1,9 @@
 from UCB1_SMPy import UCB
-from Bernolli import Bernoulli
-from OSSB_SMPy import OSSB_SMPy
-from OSSB import OSSB, OSSB_TL, LipschitzOSSB, LipschitzOSSB_TL
+from policies.Bernolli import Bernoulli
+# from OSSB_SMPy import OSSB_SMPy
+# from OSSB import OSSB, LipschitzOSSB
+
+from OSSB_transfer_hyp10 import OSSB_DEL, LipschitzOSSB_DEL, LipschitzOSSB_DEL_true
 from evaluator import *
 import matplotlib
 from tqdm import tqdm
@@ -29,26 +31,18 @@ ENVIRONMENTS = [
     ]
 
 POLICIES = [
+        # {
+        #     "archtype":UCB,
+        #     "params":{}
+        # },
         {
-            "archtype":UCB,
+            "archtype":OSSB_DEL,
             "params":{}
         },
-        {
-            "archtype":OSSB,
-            "params":{}
-        },
-        {
-            "archtype":LipschitzOSSB,
-            "params":{}
-        },
-        {
-            "archtype":OSSB_TL,
-            "params":{}
-        },
-        {
-            "archtype":LipschitzOSSB_TL,
-            "params":{}
-        }
+        # {
+        #     "archtype":LipschitzOSSB,
+        #     "params":{}
+        # },
     ]
 
 
