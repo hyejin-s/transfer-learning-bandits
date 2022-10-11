@@ -25,11 +25,12 @@ from SMPyBandits.Environment.usetqdm import USE_TQDM, tqdm
 from SMPyBandits.Environment.plotsettings import BBOX_INCHES, signature, maximizeWindow, palette, makemarkers, add_percent_formatter, legend, show_and_save, nrows_ncols, violin_or_box_plot, adjust_xticks_subplots, table_to_latex
 from SMPyBandits.Environment.sortedDistance import weightedDistance, manhattan, kendalltau, spearmanr, gestalt, meanDistance, sortedDistance
 # Local imports, objects and functions
-from SMPyBandits.Environment.MAB import MAB, MarkovianMAB, ChangingAtEachRepMAB, NonStationaryMAB, PieceWiseStationaryMAB, IncreasingMAB
+# from SMPyBandits.Environment.MAB import MarkovianMAB, ChangingAtEachRepMAB, NonStationaryMAB, PieceWiseStationaryMAB, IncreasingMAB
+from MAB import *
 from Result import *
 from SMPyBandits.Environment.memory_consumption import getCurrentMemory, sizeof_fmt
 
-from OSSB import *
+from OSSB_transfer_hyp10 import *
 from collections import defaultdict
 
 REPETITIONS = 1    #: Default nb of repetitions
@@ -55,7 +56,7 @@ MORE_ACCURATE = True           #: Use the count of selections instead of rewards
 FINAL_RANKS_ON_AVERAGE = True  #: Final ranks are printed based on average on last 1% rewards and not only the last rewards
 USE_JOBLIB_FOR_POLICIES = False  #: Don't use joblib to parallelize the simulations on various policies (we parallelize the random Monte Carlo repetitions)
 
-ref_value = 20
+ref_value = 50
 
 
 class Evaluator(object):
@@ -115,6 +116,7 @@ class Evaluator(object):
 
         # Internal vectorial memory
         self.rewards = np.zeros((self.nbPolicies, len(self.envs), self.horizon))  #: For each env, history of rewards, ie accumulated rewards
+        self.regretRewards = np.zeros((self.nbPolicies, len(self.envs), self.horizon))  #: For each env, history of rewards, ie accumulated rewards
         self.rewards_mean = np.zeros((self.nbPolicies, len(self.envs), self.repetitions, self.horizon))
         self.lastCumRewards = np.zeros((self.nbPolicies, len(self.envs), self.repetitions))  #: For each env, last accumulated rewards, to compute variance and histogram of whole regret R_T
         self.minCumRewards = np.full((self.nbPolicies, len(self.envs), self.horizon), +np.inf)  #: For each env, history of minimum of rewards, to compute amplitude (+- STD)
@@ -137,7 +139,6 @@ class Evaluator(object):
         self.estimatedLipschitz = dict()
         self.etaSolution = dict()
         self.etaCompare = dict()
-        self.zetaInfo = dict()
         self.compareInfo = dict()
         self.cumreward = dict()      
         self.cumpull = dict()
@@ -151,10 +152,9 @@ class Evaluator(object):
             self.runningTimes[envId] = np.zeros((self.nbPolicies, self.repetitions))
             self.memoryConsumption[envId] = np.zeros((self.nbPolicies, self.repetitions))
             self.numberOfCPDetections[envId] = np.zeros((self.nbPolicies, self.repetitions), dtype=np.int32)
-            self.estimatedLipschitz[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon))
+            self.estimatedLipschitz[envId] = np.zeros((self.repetitions, self.horizon))
             self.etaSolution[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
             self.etaCompare[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
-            self.zetaInfo[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, self.envs[envId].nbArms))
             self.compareInfo[envId] = np.zeros((self.nbPolicies, self.repetitions, self.horizon, 3))
             self.cumreward[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
             self.cumpull[envId] = np.zeros((self.nbPolicies, self.repetitions, self.envs[envId].nbArms, self.horizon), dtype=np.int32)
@@ -250,6 +250,7 @@ class Evaluator(object):
         def store(r, policyId, repeatId):
             """ Store the result of the #repeatId experiment, for the #policyId policy."""
             self.rewards[policyId, envId, :] += r.rewards
+            self.regretRewards[policyId, envId, :] += r.regretRewards
             self.rewards_mean[policyId, envId, repeatId, :] += r.rewards
             self.lastCumRewards[policyId, envId, repeatId] = np.sum(r.rewards)
 
@@ -269,11 +270,11 @@ class Evaluator(object):
             self.lastPulls[envId][policyId, :, repeatId] = r.pulls
             self.runningTimes[envId][policyId, repeatId] = r.running_time
             self.numberOfCPDetections[envId][policyId, repeatId] = r.number_of_cp_detections
-            self.estimatedLipschitz[envId][policyId][repeatId] = r.estimatedLC
+            if policyId == 1:
+                self.estimatedLipschitz[envId][repeatId] = r.estimatedLC
             self.etaSolution[envId][policyId][repeatId] = r.eta_Solution
             self.etaCompare[envId][policyId][repeatId] = r.eta_Compare
-            self.zetaInfo[envId][policyId][repeatId] = r.zeta_Info
-            self.compareInfo[envId][policyId][repeatId] = r.compare_Info
+            # self.compareInfo[envId][policyId][repeatId] = r.compare_Info
             for armId in range(env.nbArms):
                 for t in range(self.horizon):
                     if r.choices[t] == armId:
@@ -295,7 +296,24 @@ class Evaluator(object):
                     else:
                         if t != 0:
                             self.cumpull[envId][policyId, repeatId, armId, t] = self.cumpull[envId][policyId, repeatId, armId, t-1]
-
+        
+        # Start for one repetition
+        for repeatId in range(self.repetitions):
+            if self.useJoblib:
+                seeds = np.random.randint(low=0, high=100*self.nbPolicies, size=self.nbPolicies)
+                policyIdout = 0
+                for r in Parallel(n_jobs=self.cfg['n_jobs'], pre_dispatch='3*n_jobs', verbose=self.cfg['verbosity'])(
+                    delayed(delayed_play)(env, policy, self.horizon, random_shuffle=self.random_shuffle, random_invert=self.random_invert, nb_break_points=self.nb_break_points, allrewards=allrewards, seed=seeds[policyId], repeatId=repeatId, useJoblib=self.useJoblib)
+                    for policyId, policy in tqdm(enumerate(self.policies), desc="Policy||")
+                ):
+                    #print("\n\n\n- Evaluating policy #{}/{}: {} ...".format(policyIdout + 1, self.nbPolicies, self.policies[policyIdout]))
+                    store(r, policyIdout, repeatId)
+                    policyIdout += 1
+            else:
+                for policyId, policy in tqdm(enumerate(self.policies), desc="Policy"):
+                    r = delayed_play(env, policy, self.horizon, random_shuffle=self.random_shuffle, random_invert=self.random_invert, nb_break_points=self.nb_break_points, allrewards=allrewards, repeatId=repeatId, useJoblib=self.useJoblib)
+                    store(r, policyId, repeatId)
+        """
         # Start for all policies
         for policyId, policy in enumerate(self.policies):
             print("\n\n\n- Evaluating policy #{}/{}: {} ...".format(policyId + 1, self.nbPolicies, policy))
@@ -312,6 +330,7 @@ class Evaluator(object):
                 for repeatId in tqdm(range(self.repetitions), desc="Repeat"):
                     r = delayed_play(env, policy, self.horizon, random_shuffle=self.random_shuffle, random_invert=self.random_invert, nb_break_points=self.nb_break_points, allrewards=allrewards, repeatId=repeatId, useJoblib=self.useJoblib)
                     store(r, policyId, repeatId)
+        """
 
     # --- Save to disk methods
 
@@ -419,6 +438,10 @@ class Evaluator(object):
         """Extract mean rewards."""
         return self.rewards[policyId, envId, :] / float(self.repetitions)
 
+    def getRegretRewards(self, policyId, envId=0):
+        """Extract mean rewards."""
+        return self.regretRewards[policyId, envId, :] / float(self.repetitions)
+
     def getAverageWeightedSelections(self, policyId, envId=0):
         """Extract weighted count of selections."""
         weighted_selections = np.zeros(self.horizon)
@@ -439,6 +462,10 @@ class Evaluator(object):
     def getCumulatedRegret_LessAccurate(self, policyId, envId=0):
         """Compute cumulative regret, based on accumulated rewards."""
         return np.cumsum(self.envs[envId].get_maxArm(self.horizon) - self.getRewards(policyId, envId))
+
+    def getRewardCumulatedRegret_LessAccurate(self, policyId, envId=0):
+        """Compute cumulative regret, based on accumulated rewards."""
+        return np.cumsum(self.envs[envId].get_maxArmReward(self.horizon) - self.getRegretRewards(policyId, envId))
 
     def getCumulatedRegret_MoreAccurate(self, policyId, envId=0):
         """Compute cumulative regret, based on counts of selections and not actual rewards."""
@@ -552,6 +579,11 @@ class Evaluator(object):
         means = [ np.mean(number_of_cp_detections) for number_of_cp_detections in all_number_of_cp_detections ]
         stds  = [ np.std(number_of_cp_detections) for number_of_cp_detections in all_number_of_cp_detections ]
         return means, stds, all_number_of_cp_detections
+    
+    # self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
+    def getLastPulls(self, envId=0):
+        return self.lastPulls[envId]
+    
 
     # --- Plotting methods
 
@@ -603,24 +635,7 @@ class Evaluator(object):
             for repeatId in range(self.repetitions):
                 last_mean[policyId][repeatId] = self.cumreward[envId][policyId][repeatId, :, self.horizon-1]/self.cumpull[envId][policyId][repeatId, :, self.horizon-1]
         return last_mean
-    
-    def plotRegret_my(self, filepath, envId=0):
-        X = self._times - 1
-        regret = np.zeros((self.nbPolicies, self.horizon))
-        for i in range(self.repetitions):
-            for policyId in range(self.nbPolicies):
-                regret[policyId] += np.cumsum(self.envs[envId].get_maxArm(self.horizon) - self.getRewards(policyId, envId))
-        regret = regret/float(self.repetitions)
-        fig = plt.figure()
-        colors = palette(self.nbPolicies)
 
-        for policyId in range(self.nbPolicies):
-            plt.plot(X, regret[policyId], color=colors[policyId])
-        plt.xlabel("Order of Arms")
-        plt.ylabel("Regret")
-        plt.savefig(filepath+'/Regret_my', dpi=300)
-        
-        return fig
 
     def plotRegrets(self, filepath, envId=0,
                     savefig=None, meanReward=False,
@@ -631,285 +646,6 @@ class Evaluator(object):
                     ):
         """Plot the centralized cumulated regret, support more than one environments (use evaluators to give a list of other environments). """
         moreAccurate = moreAccurate if moreAccurate is not None else self.moreAccurate
-        fig = plt.figure(figsize=(24,16))
-        ymin = 0
-        colors = ['b', 'g', 'r', 'c']
-        markers = makemarkers(self.nbPolicies)
-        X = self._times - 1
-        plot_method = plt.loglog if loglog else plt.plot
-        plot_method = plt.semilogy if semilogy else plot_method
-        plot_method = plt.semilogx if semilogx else plot_method
-        labels = [r'$\pi(\infty)$', r'$\pi(\hat{L}_{t})$', r'$\pi$(true)', r'$\pi$(mistaken)']
-        for i, policy in enumerate(self.policies):
-            if meanReward:
-                Y = self.getAverageRewards(i, envId)
-            else:
-                #Y = self.getCumulatedRegret(i, envId, moreAccurate=moreAccurate)
-                Y = self.getCumulatedRegret(i, envId)
-                if normalizedRegret:
-                    Y /= np.log(X + 2)   # XXX prevent /0
-            ymin = min(ymin, np.min(Y))
-            lw = 10 if ('$N=' in policy.__cachedstr__ or 'Aggr' in policy.__cachedstr__ or 'CORRAL' in policy.__cachedstr__ or 'LearnExp' in policy.__cachedstr__ or 'Exp4' in policy.__cachedstr__) else 8
-            if len(self.policies) > 8: lw -= 1
-            if semilogx or loglog:
-                # FIXED for semilogx plots, truncate to only show t >= 100
-                X_to_plot_here = X[X >= 100]
-                Y_to_plot_here = Y[X >= 100]
-                plot_method(X_to_plot_here[::self.delta_t_plot], Y_to_plot_here[::self.delta_t_plot], label=labels[i], color=colors[i], marker=markers[i], markevery=(i / 50., 0.1), lw=lw, ms=int(1.5*lw))
-            else:
-                plt.plot(X, Y, label=labels[i], color=colors[i], marker=markers[i], markevery=(i / 50., 0.1), lw=lw, ms=int(1.5*lw), linewidth=5)
-            
-        lowerbound = self.envs[envId].lowerbound()
-        lowerbound_sparse = self.envs[envId].lowerbound_sparse()
-    
-        if not meanReward:
-            if semilogy or loglog:
-                ymin = max(0, ymin)
-            plt.ylim(ymin, plt.ylim()[1])
-        # Get a small string to add to ylabel
-        ylabel2 = r"%s%s" % (r", $\pm 1$ standard deviation" if (plotSTD and not plotMaxMin) else "", r", $\pm 1$ amplitude" if (plotMaxMin and not plotSTD) else "")
-
-        if drawUpperBound and not (semilogx or loglog):
-            # Experiment to print also an upper bound: it is CRAZILY huge!!
-            lower_amplitudes = np.asarray([arm.lower_amplitude for arm in self.envs[envId].arms])
-            amplitude = np.max(lower_amplitudes[:, 1])
-            maxVariance = max([p * (1 - p) for p in self.envs[envId].means])
-            K = self.envs[envId].nbArms
-            upperbound = 76 * np.sqrt(maxVariance * K * X) + amplitude * K
-            plt.plot(X[::self.delta_t_plot], upperbound[::self.delta_t_plot], 'r-', label=r"Minimax upper-bound for kl-UCB++", lw=3)
-        # FIXED for semilogx plots, truncate to only show t >= 100
-        if semilogx or loglog:
-            X = X[X >= 100]
-        else:
-            X = X[X >= 1]
-        if self.plot_lowerbound:
-            # We also plot the Kwon et al lower bound
-            if self.envs[envId]._sparsity is not None and not np.isnan(lowerbound_sparse):
-                plt.plot(X[::self.delta_t_plot], lowerbound_sparse * np.ones_like(X)[::self.delta_t_plot], 'k--', label=r"[Kwon et al.] lower bound, $s = {}$, $= {:.3g} \; \log(t)$".format(self.envs[envId]._sparsity, lowerbound_sparse), lw=3)
-
-        if self.nb_break_points > 0:
-            # DONE fix math formula in case of non stationary bandits
-            plt.ylabel("Non-stationary regret\n" + r"$R_t = \sum_{s=1}^{t} \max_k \mu_k(s) - \sum_{s=1}^{t}$%s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{P}_{%d}[A(t)=k]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$" % (self.repetitions), ylabel2))
-        else:
-            plt.ylabel(r"Regret", fontsize=60)
-        plt.xlabel(r"Time", fontsize=60)
-        plt.legend(loc='upper left', fontsize=40)
-        plt.xticks(fontsize=40)
-        plt.xticks([0,10000,20000,30000,40000,50000], ['0', '10k', '20k', '30k', '40k', '50k'])
-
-        plt.yticks(fontsize=40)
-        plt.grid(b=None)
-        #plt.title("Cumulated regrets for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
-        
-        plt.savefig(filepath+'/Regret')
-        plt.savefig(filepath+'/Regret.pdf', format='pdf', dpi=300)
-
-        return fig
-
-    def plotConditionalExpectation_topbottom_LC(self, filepath, envId=0):
-        Lips_list = np.zeros((self.repetitions))
-        percent = 0.2
-        for repeatId in range(self.repetitions):
-            Lips_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-            Lips_list[repeatId] = Lips_value
-        
-        Lips_sort = np.sort(Lips_list)
-        bottom_mean = np.zeros((self.envs[envId].nbArms))
-        top_mean = np.zeros((self.envs[envId].nbArms))
-        for i in range(int(percent*self.repetitions)):
-            bottom_mean += self.lastPulls[envId][1, :, i]
-            top_mean += self.lastPulls[envId][1, :, -(i+1)]
-
-        with open(filepath+ "/topbottom_Pulls.txt", "w") as f:
-            f.write(str(bottom_mean/int(percent*self.repetitions)))
-            f.write("\n")
-            f.write(str(top_mean/int(percent*self.repetitions)))
-
-        #self.lastPulls[envId] = np.zeros((self.nbPolicies, self.envs[envId].nbArms, self.repetitions), dtype=np.int32)
-        X = np.arange(1,self.envs[envId].nbArms+1)
-        fig = plt.figure(figsize=(20,15))
-
-        plt.plot(X, bottom_mean/int(percent*self.repetitions), label='bottom {}%'.format(percent*100), color='r', linewidth=5)
-        plt.plot(X, top_mean/int(percent*self.repetitions), label='top {}%'.format(percent*100), color='b', linewidth=5)
-
-        plt.xlabel('Arm Index', fontsize=60)
-        plt.ylabel('Number of Pulls', fontsize=60)
-        plt.xticks(fontsize=40)
-        plt.yticks(fontsize=40)
-        plt.legend(fontsize=40)
-        plt.grid(b=None)
-        
-        plt.savefig(filepath+'/topbottom_LC', dpi=300)
-        plt.savefig(filepath+'/topbottom_LC.pdf', format='pdf', dpi=300) 
-        return fig
-
-    def plotConditionalExpectation_topbottom(self, filepath, envId=0):
-        # top and bottom 20%
-        EL_repetition = defaultdict()
-        percent = 0.2
-        
-
-        # last pull
-        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
-        for repeatId in range(self.repetitions):
-            # last pull
-            for t in range(self.horizon):
-                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            # save key: repeatId, value: Estimated Lipschitz Constant
-            EL_repetition[repeatId] = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-        align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
-
-        # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
-        
-        Q = defaultdict(list)
-        fig = plt.figure(figsize=(20,15))
-
-        for i in range(int(self.repetitions*percent)):
-            Q[0].append(cum_pullarm[align_ELrepetition[i][0]]) # bottom30
-            Q[1].append(cum_pullarm[align_ELrepetition[self.repetitions-i-1][0]]) #top30
-        X = np.arange(1,self.envs[envId].nbArms+1)
-        Y = []
-        for i in range(len(Q.keys())):
-            meanY = np.array(list(Q.values())[i]).mean(axis=0)
-            Y.append(meanY)
-
-        plt.plot(X, Y[0], label='bottom {}%'.format(percent*100), color='r', linewidth=5)
-        plt.plot(X, Y[1], label='top {}%'.format(percent*100), color='b', linewidth=5)
-    
-        plt.xlabel('Arm Index', fontsize=60)
-        plt.ylabel('Number of Pulls', fontsize=60)
-        plt.xticks(fontsize=40)
-        plt.yticks(fontsize=40)
-        plt.legend(fontsize=40)
-        #plt.title('Estmated Lipschitz Constant_top and bottom {} percent_Mean number of times each arm pulls in {}:\n Total {} repetitions'.format(percent*100, self.horizon, self.repetitions))
-        plt.grid(b=None)
-        
-        plt.savefig(filepath+'/topbottom', dpi=300)
-        plt.savefig(filepath+'/topbottom.pdf', format='pdf', dpi=300) 
-
-        return fig  
-    
-    def plotLipschitzConstant(self, filepath, envId=0):
-        # plot estimated Lipschitz constant => only Lipschitz_unknown case
-        X = self._times - 1
-        fig = plt.figure(figsize=(20,15))
-        
-        trueLCs = np.full(self.horizon, trueLC)
-        plt.plot(X, trueLCs, label='True Lipschitz Constant', color='r', linewidth=5)
-
-        meanLC = self.estimatedLipschitz[envId][1].mean(axis=0)
-        std = np.std(self.estimatedLipschitz[envId][1], axis=0)/np.sqrt(self.repetitions)
-        ci = 1.96*std
-        plt.plot(X, meanLC, label='Estimated Lipschitz Constant', color='b', linewidth=5)
-        plt.fill_between(X, meanLC-ci, meanLC+ci, alpha=0.1, color='b')
-        
-        plt.xlabel('Time', fontsize=60)
-        plt.ylabel('Lipschitz Constant', fontsize=680)
-        plt.xticks(fontsize=40)
-        plt.yticks(fontsize=40)
-        plt.legend(fontsize=40)
-        plt.grid(b=None)
-
-        plt.savefig(filepath+'/LipschitzConstant', dpi=300)
-        plt.savefig(filepath+'/LipschitzConstant.pdf', format='pdf', dpi=300)
-        return fig
-
-    def plotLipschitzConstant(self, filepath, envId=0):
-        # plot estimated Lipschitz constant => only Lipschitz_unknown case
-        X = self._times - 1
-        fig = plt.figure(figsize=(20,15))
-        
-        trueLCs = np.full(self.horizon, trueLC)
-        plt.plot(X, trueLCs, label='True Lipschitz Constant', color='r', linewidth=5)
-
-        meanLC = self.estimatedLipschitz[envId][1].mean(axis=0)
-        std = np.std(self.estimatedLipschitz[envId][1], axis=0)/np.sqrt(self.repetitions)
-        ci = 1.96*std
-        plt.plot(X, meanLC, label='Estimated Lipschitz Constant', color='b', linewidth=5)
-        plt.fill_between(X, meanLC-ci, meanLC+ci, alpha=0.1, color='b')
-        
-        plt.xlabel('Time', fontsize=60)
-        plt.ylabel('Lipschitz Constant', fontsize=60)
-        plt.xticks(fontsize=40)
-        plt.yticks(fontsize=40)
-        plt.legend(fontsize=40)
-        plt.grid(b=None)
-
-        plt.savefig(filepath+'/LipschitzConstant', dpi=300)
-        plt.savefig(filepath+'/LipschitzConstant.pdf', format='pdf', dpi=300)
-        return fig
-
-    def plotLipschitz_hist(self, filepath, envId=0):
-        fig = plt.figure(figsize=(20,15))
-        Lips_list = np.zeros((self.repetitions))
-        
-        for repeatId in range(self.repetitions):
-            Lips_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-            Lips_list[repeatId] = Lips_value
-        plt.hist(Lips_list, color='r')
-        plt.xlabel('Estimated Lipschitz Constant', fontsize=60)
-        plt.ylabel('Number of Repetitions', fontsize=60)
-        plt.xticks(fontsize=40)
-        plt.yticks(fontsize=40)
-        plt.legend(fontsize=40)
-        plt.grid(b=None)
-
-        plt.savefig(filepath+'/LCHistogram', dpi=300)
-        plt.savefig(filepath+'/LCHistogram.pdf', format='pdf', dpi=300)
-        return fig
-    
-    def plotLipschitzConstant_tb(self, filepath, envId=0):
-        # plot estimated Lipschitz constant => only Lipschitz_unknown case
-        percent = 0.2
-        Lips_list = np.zeros((self.repetitions))
-        
-        for repeatId in range(self.repetitions):
-            Lips_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-            Lips_list[repeatId] = Lips_value
-        
-        Lips_sort = np.sort(Lips_list)
-        bottom_mean = np.zeros((self.horizon))
-        top_mean = np.zeros((self.horizon))
-        for i in range(int(percent*self.repetitions)):
-            bottom_mean += self.estimatedLipschitz[envId][1][i]
-            top_mean += self.estimatedLipschitz[envId][1][-(i+1)]
-        
-        #meanLC = self.estimatedLipschitz[envId][1].mean(axis=0)
-        #std = np.std(self.estimatedLipschitz[envId][1], axis=0)/np.sqrt(self.repetitions)
-        #ci = 1.96*std
-
-        X = self._times - 1
-        fig = plt.figure(figsize=(20,15))
-
-        plt.plot(X, bottom_mean/int(percent*self.repetitions), label='bottom {}%'.format(percent*100), color='r', linewidth=5)
-        plt.plot(X, top_mean/int(percent*self.repetitions), label='top {}%'.format(percent*100), color='b', linewidth=5)
-    
-        #plt.plot(X, meanLC, label='Estimated Lipschitz Constant', color='b', linewidth=5)
-        #plt.fill_between(X, meanLC-ci, meanLC+ci, alpha=0.1, color='b')
-
-        trueLCs = np.full(self.horizon, trueLC)
-        plt.plot(X, trueLCs, label='True Lipschitz Constant', color='g', linewidth=5)
-
-        plt.xlabel('Time', fontsize=60)
-        plt.ylabel('Lipschitz Constant', fontsize=60)
-        plt.xticks(fontsize=40)
-        plt.yticks(fontsize=40)
-        plt.legend(fontsize=40)
-        plt.grid(b=None)
-
-        plt.savefig(filepath+'/LipschitzConstant_tb', dpi=300)
-        plt.savefig(filepath+'/LipschitzConstant_tb.pdf', format='pdf', dpi=300)
-        return fig
-
-    def plotRegrets_log(self, filepath, envId=0,
-                    savefig=None, meanReward=False,
-                    plotSTD=False, plotMaxMin=False,
-                    semilogx=False, semilogy=False, loglog=False,
-                    normalizedRegret=False, drawUpperBound=False,
-                    moreAccurate=None
-                    ):
-        """Plot the centralized cumulated regret, support more than one environments (use evaluators to give a list of other environments). """
-        moreAccurate = moreAccurate if moreAccurate is not None else self.moreAccurate
         fig = plt.figure()
         ymin = 0
         colors = palette(self.nbPolicies)
@@ -922,8 +658,7 @@ class Evaluator(object):
             if meanReward:
                 Y = self.getAverageRewards(i, envId)
             else:
-                #Y = self.getCumulatedRegret(i, envId, moreAccurate=moreAccurate)
-                Y = self.getCumulatedRegret(i, envId)/self._times
+                Y = self.getCumulatedRegret(i, envId, moreAccurate=moreAccurate)
                 if normalizedRegret:
                     Y /= np.log(X + 2)   # XXX prevent /0
             ymin = min(ymin, np.min(Y))
@@ -1018,8 +753,10 @@ class Evaluator(object):
             else:
                 plt.ylabel(r"Regret $R_t = t \mu^* - \sum_{s=1}^{t}$ %s%s" % (r"$\sum_{k=1}^{%d} \mu_k\mathbb{E}_{%d}[T_k(t)]$" % (self.envs[envId].nbArms, self.repetitions) if moreAccurate else r"$\mathbb{E}_{%d}[r_s]$ (from actual rewards)" % (self.repetitions), ylabel2))
             plt.title("Cumulated regrets for different bandit algorithms, averaged ${}$ times\n${}$ arms{}: {}".format(self.repetitions, self.envs[envId].nbArms, self.envs[envId].str_sparsity(), self.envs[envId].reprarms(1, latex=True)))
-    
-        plt.savefig(filepath+'/Regret_log', dpi=300)
+        if semilogy:
+            plt.savefig(filepath+'/Regret_semilogy', dpi=300)
+        else:
+            plt.savefig(filepath+'/Regret', dpi=300)
         return fig
 
     def plotBestArmPulls(self, envId=0, savefig=None):
@@ -1078,7 +815,6 @@ class Evaluator(object):
             plt.plot(X, meanY, label=policyId.__cachedstr__)
             plt.fill_between(X, meanY-ci, meanY+ci, alpha=0.3)                           
         legend()
-        
         plt.xlabel("Order of Arms")
         plt.ylabel("number of draws")
         plt.title("Mean number of times each arm pulls in ${}$ for different bandit algorithms, \naveraged ${}$ times: ${}$ arms".format(self.horizon, self.repetitions, self.envs[envId].nbArms))
@@ -1196,6 +932,22 @@ class Evaluator(object):
         plt.savefig(filepath+'/num_ArmPulls_top_bottom10%mean', dpi=300)
         return fig
     
+    def plotLipschitz_hist(self, filepath, envId=0):
+        fig = plt.figure()
+        colors = ['tomato']
+        Lips_list = np.zeros((self.repetitions))
+        
+        for repeatId in range(self.repetitions):
+            Lips_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            Lips_list[repeatId] = Lips_value
+        plt.hist(Lips_list, label=self.policies[1].__cachedstr__, color=colors[0])
+        legend()
+        plt.xlabel('Lipschitz Constant')
+        plt.ylabel('Number of repetition: total {}'.format(self.repetitions))
+        plt.title("Lipschitz Constant Histogram")
+        plt.savefig(filepath+'/Lipschitz_Constant_Histogram', dpi=300)
+        return fig 
+
     # not yet
     # Error: self.lastPulls
     def plotLipschitz_restrict(self,filepath,envId=0):
@@ -1206,11 +958,11 @@ class Evaluator(object):
 
         last_pull = np.transpose(self.lastPulls[envId][1]) # repetition, arm
         for repeatId in range(self.repetitions):
-            if self.estimatedLipschitz[envId][1][repeatId][self.horizon-1] < ref_value:
+            if self.estimatedLipschitz[envId][repeatId][self.horizon-1] < ref_value:
                 Y = last_pull[repeatId]
                 Y_list.append(Y)
                 repeat_list.append(repeatId)
-                plt.plot(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][1][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
+                plt.plot(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
         #legend()
         #plt.xlabel('Ordering of arms')
         #plt.ylabel('Number of arms pulls')
@@ -1220,7 +972,7 @@ class Evaluator(object):
         with open(filepath+ "/Condition_repeatId.txt", "w") as f:
             for i in range(len(repeat_list)):
                 f.write("\n"+str(repeat_list[i])+": ")
-                f.write(str(self.estimatedLipschitz[envId][1][repeat_list[i]][self.horizon-1]))
+                f.write(str(self.estimatedLipschitz[envId][repeat_list[i]][self.horizon-1]))
 
         return fig 
     
@@ -1229,11 +981,11 @@ class Evaluator(object):
         count = 1
         last_pull = np.transpose(self.lastPulls[envId][1]) # repetition, arm
         for repeatId in range(self.repetitions):
-            if self.estimatedLipschitz[envId][1][repeatId][self.horizon-1] < ref_value:
+            if self.estimatedLipschitz[envId][repeatId][self.horizon-1] < ref_value:
                 count +=1
                 X = np.array([i + 0.8*count for i in range(self.envs[envId].nbArms)])
                 Y = last_pull[repeatId]
-                plt.bar(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][1][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
+                plt.bar(X, Y, label=self.policies[1].__cachedstr__+", constant: "+str(self.estimatedLipschitz[envId][repeatId][self.horizon-1])+", repeatId: "+str(repeatId))
         legend()
         X = np.arange(self.envs[envId].nbArms)
         plt.xticks([i*count + (1/count) for i in range(self.envs[envId].nbArms)], X)
@@ -1242,6 +994,27 @@ class Evaluator(object):
         plt.title("Lipschitz Constant Histogram")
         plt.savefig(filepath+'/Lipschitz_Constant_restrict_bar', dpi=300)
         return fig 
+    
+    
+    def plotLipschitzConstant(self, filepath, envId=0):
+        # plot estimated Lipschitz constant => only Lipschitz_unknown case
+        X = self._times - 1
+        fig = plt.figure()
+        
+        trueLCs = np.full(self.horizon, trueLC)
+        plt.plot(X, trueLCs, label='true Lipschitz Constant')
+
+        meanLC = self.estimatedLipschitz[envId].mean(axis=0)
+        std = np.std(self.estimatedLipschitz[envId], axis=0)/np.sqrt(self.repetitions)
+        ci = 1.96*std
+        plt.plot(X, meanLC, label='estimated Lipschitz Constant', color='green')
+        plt.fill_between(X, meanLC-ci, meanLC+ci, alpha=0.3, color='green')
+        
+        plt.xlabel('time')
+        plt.ylabel('Lipschitz Constant')
+        plt.legend()
+        plt.savefig(filepath+'/LipschitzConstant', dpi=300)
+        return fig
 
     def plotConditionalExpectation(self, filepath, envId=0):
         Q = defaultdict(list)
@@ -1251,7 +1024,7 @@ class Evaluator(object):
         for repeatId in range(self.repetitions):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
+            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
             if estimated_value < ref_value:
                 ratio_suboptimal = cum_pullarm[repeatId][0] / self.horizon #sub_optimalarm
                 Q[estimated_value].append(ratio_suboptimal)
@@ -1291,14 +1064,15 @@ class Evaluator(object):
     def plotConditionalExpectation_bisection(self, filepath, envId=0):
         Q = defaultdict(list)
         fig = plt.figure()
+        standard_value = 20
         
         colors =['tomato', 'deepskyblue']
         cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
         for repeatId in range(self.repetitions):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-            if estimated_value < ref_value:
+            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+            if estimated_value < standard_value:
                 Q[0].append(cum_pullarm[repeatId])
             else:
                 Q[1].append(cum_pullarm[repeatId])
@@ -1312,53 +1086,106 @@ class Evaluator(object):
         plt.plot(X, Y[0], label='Lipschitz Constant<20', color=colors[0])
         plt.plot(X, Y[1], label='Lipschitz Constant>20', color=colors[1])
         legend()
-        plt.xlabel('Arm Index')
+        plt.xlabel('Estimated Lipschitz Constant_bisection')
         plt.ylabel('Ratio of suboptimal arms pulls')
-        plt.title('Estimated Lipschitz Constant bisection_Mean number of times each arm pulls in ${}$:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
         plt.savefig(filepath+'/ConditionalExpectation_bisection', dpi=300)   
 
         return fig
-    
-    def plotConditionalExpectation_bottom(self, filepath, envId=0):
-        Q = defaultdict(list)
-        fig = plt.figure()
-        
-        colors =['tomato', 'deepskyblue']
+
+    def plotConditionalExpectation_bisection20(self, filepath, envId=0):
+        # top and bottom 30%
+
+        EL_repetition = defaultdict()
+        percent = 0.2
+
+        # last pull
         cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
         for repeatId in range(self.repetitions):
+            # last pull
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
-            if estimated_value < ref_value:
-                Q[0].append(cum_pullarm[repeatId])
+            # save key: repeatId, value: Estimated Lipschitz Constant
+            EL_repetition[repeatId] = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+        align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
+
+        # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
         
+        Q = defaultdict(list)
+        fig = plt.figure()
+        colors =['tomato', 'deepskyblue']
+        for i in range(int(self.repetitions*percent)):
+            Q[0].append(cum_pullarm[align_ELrepetition[i][0]]) # bottom30
+            Q[1].append(cum_pullarm[align_ELrepetition[self.repetitions-i-1][0]]) #top30
+        X = np.arange(self.envs[envId].nbArms)
+        Y = []
+        for i in range(len(Q.keys())):
+            meanY = np.array(list(Q.values())[i]).mean(axis=0)
+            Y.append(meanY)
+        
+        plt.plot(X, Y[0], label='Lipschitz Constant bottom 20%', color=colors[0])
+        plt.plot(X, Y[1], label='Lipschitz Constant top 20%', color=colors[1])
+        legend()
+        plt.xlabel('Estimated Lipschitz Constant_bisection')
+        plt.ylabel('Ratio of suboptimal arms pulls')
+        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_bisection20', dpi=300)   
+
+        return fig
+
+    def plotConditionalExpectation_bisection30(self, filepath, envId=0):
+        # top and bottom 30%
+
+        EL_repetition = defaultdict()
+        percent = 0.3
+
+        # last pull
+        cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
+        for repeatId in range(self.repetitions):
+            # last pull
+            for t in range(self.horizon):
+                cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
+            # save key: repeatId, value: Estimated Lipschitz Constant
+            EL_repetition[repeatId] = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
+        align_ELrepetition = sorted(EL_repetition.items(), key=lambda x: x[1]) # descending order of value
+
+        # EL_repetition = np.sort(self.estimatedLipschitz[envId][:, self.horizon-1]) # Lipschitz constant for every repetion
+        
+        Q = defaultdict(list)
+        fig = plt.figure()
+        colors =['tomato', 'deepskyblue']
+        for i in range(int(self.repetitions*percent)):
+            Q[0].append(cum_pullarm[align_ELrepetition[i][0]]) # bottom30
+            Q[1].append(cum_pullarm[align_ELrepetition[self.repetitions-i-1][0]]) #top30
         X = np.arange(self.envs[envId].nbArms)
         Y = []
         for i in range(len(Q.keys())):
             meanY = np.array(list(Q.values())[i]).mean(axis=0)
             Y.append(meanY)
 
-        plt.plot(X, Y[0], label='Lipschitz Constant<20', color=colors[0])
+
+        plt.plot(X, Y[0], label='Lipschitz Constant bottom 30%', color=colors[0])
+        plt.plot(X, Y[1], label='Lipschitz Constant top 30%', color=colors[1])
         legend()
-        plt.xlabel('Arm Index')
+        plt.xlabel('Estimated Lipschitz Constant_bisection')
         plt.ylabel('Ratio of suboptimal arms pulls')
-        plt.title('In case of Estimated Lipschitz Constant < {}, mean number of times each arm pulls in {}:\n Total {} repetitions'.format(ref_value, self.horizon, self.repetitions))
-        plt.savefig(filepath+'/ConditionalExpectation_bottom', dpi=300)   
+        plt.title('Mean number of times each arm pulls in ${}$ for estimated Lipschitz Constant:\n Total {} repetitions'.format(self.horizon, self.repetitions))
+        plt.savefig(filepath+'/ConditionalExpectation_bisection30', dpi=300)   
 
-        return fig
+        return fig   
 
-    # for representing ratio of pull suboptimal arm
+
     def plotConditionalExpectation_split(self, filepath, envId=0):
         Q = defaultdict(list)
 
         fig = plt.figure()
-        split_value = 30
+        split_value = 20
 
         cum_pullarm = np.zeros((self.repetitions, self.envs[envId].nbArms))
         for repeatId in range(self.repetitions):
             for t in range(self.horizon):
                 cum_pullarm[repeatId] += self.allPulls_rep[envId][repeatId, 1, :, t]
-            estimated_value = self.estimatedLipschitz[envId][1][repeatId][self.horizon-1]
+            estimated_value = self.estimatedLipschitz[envId][repeatId][self.horizon-1]
             ratio_suboptimal = cum_pullarm[repeatId][0] / self.horizon #sub_optimalarm
             Q[estimated_value // split_value].append(ratio_suboptimal)
 
@@ -1382,6 +1209,15 @@ class Evaluator(object):
         plt.ylabel('Ratio of suboptimal arms pulls')
         plt.title('The ratio of suboptimal arm pulls for each Estimated Lipschitz Constant:\n Total {} repetitions, {} times'.format(self.repetitions, self.horizon))
         plt.savefig(filepath+'/ConditionalExpectation_split', dpi=300)   
+      
+        return fig    
+    def estimatedLipschitzdata(self, filepath, envId=0):
+        # estimated Lipschitz Constant
+        with open(filepath+ "/estimated_Lipschitz_Constant.txt", "w") as f:
+            for t in range(self.horizon):
+                #if t % 1000 == 1:
+                f.write('\nt={}, '.format(t))
+                f.write(str(self.estimatedLipschitz[envId][0][t]))
     
     def savedata(self, filepath, envId=0, moreAccurate=True):
         # information (arms, embeddings, repetitions, epsilon, GAMMA)
@@ -1446,30 +1282,23 @@ class Evaluator(object):
             """
 
         # estimated Lipschitz Constant
-        """
         with open(filepath+ "/estimated_Lipschitz_Constant.txt", "w") as f:
-            for policyId in range(self.nbPolicies):
-                f.write("\nPolicy: " + str(policyId) + "\n")
-                for repeatId in range(self.repetitions):
-                    f.write('\nRepeat: '+str(repeatId))
-                    for t in range(self.horizon):
-                        #if t % 1000 == 1:
-                        f.write('\nt={}, '.format(t))
-                        f.write(str(self.estimatedLipschitz[envId][policyId][repeatId][t]))
-        """
+            for repeatId in range(self.repetitions):
+                f.write('\nRepeat: '+str(repeatId))
+                for t in range(self.horizon):
+                    #if t % 1000 == 1:
+                    f.write('\nt={}, '.format(t))
+                    f.write(str(self.estimatedLipschitz[envId][repeatId][t]))
             
         with open(filepath+ "/estimated_Lipschitz_Constant_last.txt", "w") as f:
-            for policyId in range(self.nbPolicies):
-                f.write("\nPolicy: " + str(policyId) + "\n")
-                for repeatId in range(self.repetitions):
-                    f.write("\n")
-                    f.write('Repeat: '+str(repeatId))
-                    f.write("\n")
-                    f.write(str(self.estimatedLipschitz[envId][policyId][repeatId][self.horizon-1]))
-                    f.write("\n")
+            for repeatId in range(self.repetitions):
+                f.write("\n")
+                f.write('Repeat: '+str(repeatId))
+                f.write("\n")
+                f.write(str(self.estimatedLipschitz[envId][repeatId][self.horizon-1]))
+                f.write("\n")
         
         # Result of Linear Programming
-        """
         with open(filepath+"/LP_solutions.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write("\nPolicy: " + str(policy) + "\n")
@@ -1480,7 +1309,7 @@ class Evaluator(object):
                         #if t % 1000 == 1:
                         f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.etaSolution[envId][i][repeatId][t], newline=", ", fmt='%.4f')
-            
+        
         with open(filepath+"/LPcompare_solutions.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write("\nPolicy: " + str(policy) + "\n")
@@ -1499,17 +1328,6 @@ class Evaluator(object):
                     f.write("\nRepeat: "+str(repeatId))
                     f.write("\n")
                     np.savetxt(f, self.etaCompare[envId][i][repeatId][self.horizon-1], newline=", ", fmt='%.4f')
-        
-        with open(filepath+"/zeta_information.txt", "w") as f:
-            for i, policy in enumerate(self.policies):
-                f.write("\nPolicy: " + str(policy) + "\n")
-                for repeatId in range(self.repetitions):
-                    f.write("\nRepeat: "+str(repeatId))
-                    f.write("\n")
-                    for t in range(self.horizon):
-                        #if t % 1000 == 1:
-                        f.write("\nt={}, ".format(t))
-                        np.savetxt(f, self.zetaInfo[envId][i][repeatId][t], newline=", ", fmt='%.4f')
 
         with open(filepath+"/action_compareInfo.txt", "w") as f:
             f.write("[estimation, exploitation, exploration]")
@@ -1522,9 +1340,8 @@ class Evaluator(object):
                         #if t % 100 == 1:
                         f.write("\nt={}, ".format(t))
                         np.savetxt(f, self.compareInfo[envId][i][repeatId][t], newline=", ", fmt='%.4f')
-        """   
+         
         # define cumreward and cumpull
-        """
         with open(filepath+ "/arms_cumreward.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
@@ -1534,7 +1351,7 @@ class Evaluator(object):
                         #if t % 100 == 1:
                         f.write("\nt= "+str(t)+", ")
                         np.savetxt(f, self.cumreward[envId][i][repeatId, :, t].astype(int), fmt='%i', newline=", ")
-            
+        
         with open(filepath+ "/arms_cumpull.txt", "w") as f:
             for i, policy in enumerate(self.policies):
                 f.write('\nPolicy:{}'.format(policy.__cachedstr__))
@@ -1558,7 +1375,7 @@ class Evaluator(object):
                         f.write("\nt= "+str(t)+", ")
                         mean_divide = self.cumreward[envId][i][repeatId, :, t]/self.cumpull[envId][i][repeatId, :, t]
                         np.savetxt(f, mean_divide, fmt='%1.3f', newline=", ")
-        """
+
         # def get_lastmeans()
         with open(filepath+ "/Empirical_means_last.txt", "w") as f:
             for i, policy in enumerate(self.policies):
@@ -1878,13 +1695,12 @@ def delayed_play(env, policy, horizon,
         # 1. The player's policy choose an arm
         choice = policy.choice()
 
-        #if('L' in policy._kwargs and policy._kwargs['L']==-1):
-        result.estimatedLC[t] = policy.LC_value
+        if('L' in policy._kwargs and policy._kwargs['L']==-1):
+            result.estimatedLC[t] = policy.LC_value
         
         result.eta_Solution[t] = policy.eta_solution
         result.eta_Compare[t] = policy.eta_compare
-        result.zeta_Info[t] = policy.zeta_info
-        result.compare_Info[t] = policy.compare_info
+        # result.compare_Info[t] = policy.compare_info
 
 
         # 2. A random reward is drawn, from this arm at this time
@@ -1895,6 +1711,7 @@ def delayed_play(env, policy, horizon,
 
         # 3. The policy sees the reward
         policy.getReward(choice, reward)
+        policy.getRegretReward(choice, reward)
 
         # 4. Finally we store the results
         result.store(t, choice, reward)

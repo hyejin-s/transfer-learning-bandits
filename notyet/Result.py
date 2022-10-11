@@ -7,7 +7,8 @@ __version__ = "0.9"
 
 import numpy as np
 
-embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
+# embeddings = [54/54, 48/54, 36/54, 24/54, 18/54, 12/54, 9/54, 6/54]
+# rates = [54, 48, 36, 24, 18, 12, 9, 6]
 
 class Result(object):
     """ Result accumulators."""
@@ -40,7 +41,7 @@ class Result(object):
         """ Store results."""
         self.choices[time] = choice
         self.rewards[time] = reward
-        self.regretRewards[time] = reward * embeddings[choice]
+        # self.regretRewards[time] = reward * rates[choice]
         self.pulls[choice] += 1
 
     def change_in_arms(self, time, indexes_bestarm):

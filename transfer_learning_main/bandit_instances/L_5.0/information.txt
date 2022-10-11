@@ -1,0 +1,5 @@
+Number of episodes: 400
+Horizon: 10000
+bound:100
+Generation Lipschitz Constant: 5
+embeddings: [0, 0.8, 0.8500000000000001, 0.9, 0.9500000000000001, 1.0]

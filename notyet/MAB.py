@@ -30,9 +30,6 @@ try:
 except ImportError:
     from plotsettings import signature, wraptext, wraplatex, palette, makemarkers, legend, show_and_save
 
-
-embeddings = [54, 48, 36, 24, 18, 12, 9, 6]
-
 class MAB(object):
     """ Basic Multi-Armed Bandit problem, for stochastic and i.i.d. arms.
     - configuration can be a dict with 'arm_type' and 'params' keys. 'arm_type' is a class from the Arms module, and 'params' is a dict, used as a list/tuple/iterable of named parameters given to 'arm_type'. Example::
@@ -95,8 +92,8 @@ class MAB(object):
         print(" - with 'arms' represented as:", self.reprarms(1, latex=True))  # DEBUG
         # self.rateReward = np.array([arm.mean * embeddings[arm] for arm in self.arms])
         self.rateReward = np.zeros(len(self.arms))
-        for i in range(len(self.arms)):
-            self.rateReward[i] = self.means[i] * embeddings[i]
+        # for i in range(len(self.arms)):
+        #     self.rateReward[i] = self.means[i] * rates[i]
             # self.rateReward[i] = self.means[i] * embeddings[i] / 54
         print(" - with 'rateReward' =", self.rateReward)
         self.maxArmReward = np.max(self.rateReward)  #: Max mean of arms
