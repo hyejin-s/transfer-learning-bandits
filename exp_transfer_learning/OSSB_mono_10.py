@@ -55,7 +55,8 @@ def solve_optimization_problem__Lipschitz(thetas, embeddings, L=-1):
         return np.full(thetas.size, np.inf)
     # for unknown Lipschitz Constant
     if L == -1:
-        LCvalue = estimate_Lipschitz_constant(thetas)
+        LCvalue = estimate_Lipschitz_constant(thetas, embeddings)
+        L = estimate_Lipschitz_constant(thetas)
     A_ub = np.zeros((sub_arms.size, sub_arms.size))
     for j, k in enumerate(sub_arms):
         nu = get_confusing_bandit(k, L, thetas, embeddings) # get /lambda^k

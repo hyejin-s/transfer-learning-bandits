@@ -55,7 +55,8 @@ def solve_optimization_problem__Lipschitz(thetas, embeddings, L=-1):
         return np.full(thetas.size, np.inf)
     # for unknown Lipschitz Constant
     if L == -1:
-        LCvalue = estimate_Lipschitz_constant(thetas, embeddings)
+        LCvalue = estimate_Lipschitz_constant(thetas, embeddings) 
+        L = estimate_Lipschitz_constant(thetas, embeddings)
     A_ub = np.zeros((sub_arms.size, sub_arms.size))
     for j, k in enumerate(sub_arms):
         nu = get_confusing_bandit(k, L, thetas, embeddings) # get /lambda^k
@@ -176,12 +177,12 @@ class BasePolicy(object):
         raise NotImplementedError("This method choice() has to be implemented in the child class inheriting from BasePolicy.")
 
 # Algorithm2
-class OSSB(BasePolicy):
+class OSSB_DEL(BasePolicy):
 
     def __init__(self, nbArms, embeddings, epsilon=EPSILON, gamma=GAMMA,
                  solve_optimization_problem="classic", LC_value=False,
                  lower=0., amplitude=1., **kwargs):
-        super(OSSB, self).__init__(nbArms, lower=lower, amplitude=amplitude)
+        super(OSSB_DEL, self).__init__(nbArms, lower=lower, amplitude=amplitude)
         # Arguments
         self.embeddings = embeddings
         assert 0 <= epsilon <= 1, "Error: the 'epsilon' parameter for 'OSSB' class has to be 0 <= . <= 1 but was {:.3g}.".format(epsilon)  # DEBUG
@@ -208,13 +209,13 @@ class OSSB(BasePolicy):
 
     def startGame(self):
         """ Start the game (fill pulls and rewards with 0)."""
-        super(OSSB, self).startGame()
+        super(OSSB_DEL, self).startGame()
         self.counter_s_no_exploitation_phase = 0
         self.phase = Phase.initialisation
 
     def getReward(self, arm, reward):
         """ Give a reward: increase t, pulls, and update cumulated sum of rewards for that arm (normalized in [0, 1])."""
-        super(OSSB, self).getReward(arm, reward)
+        super(OSSB_DEL, self).getReward(arm, reward)
 
     # --- Basic choice() and handleCollision() method
 
@@ -286,13 +287,13 @@ class OSSB(BasePolicy):
             chosen_arm = np.random.choice(np.nonzero(underexplored_arms == np.max(underexplored_arms))[0])
             return chosen_arm
 
-class LipschitzOSSB(OSSB):
+class LipschitzOSSB_DEL(OSSB_DEL):
     def __init__(self, nbArms, embeddings, gamma=GAMMA, L=-1, **kwargs):
         kwargs.update({'L': L})
-        super(LipschitzOSSB, self).__init__(nbArms, embeddings, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="estimated", **kwargs)
+        super(LipschitzOSSB_DEL, self).__init__(nbArms, embeddings, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="estimated", **kwargs)
 
-class LipschitzOSSB_true(OSSB):
+class LipschitzOSSB_DEL_true(OSSB_DEL):
     def __init__(self, nbArms, embeddings, gamma=GAMMA, L=trueLC, **kwargs):
         kwargs.update({'L': L})
-        super(LipschitzOSSB_true, self).__init__(nbArms, embeddings, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="true", **kwargs)
+        super(LipschitzOSSB_DEL_true, self).__init__(nbArms, embeddings, gamma=gamma, solve_optimization_problem="Lipschitz", LC_value="true", **kwargs)
 

@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from policies.Bernolli import Bernoulli
 from environments.evaluator_transfer_learning import *
-from OSSB_mono_2 import OSSB, LipschitzOSSB, LipschitzOSSB_true
+from OSSB_mono_2 import OSSB_DEL, LipschitzOSSB_DEL, LipschitzOSSB_DEL_true
 
 
 def com_Lipschitz_constant(thetas, embeddings):
@@ -17,7 +17,7 @@ def com_Lipschitz_constant(thetas, embeddings):
 
 def main(args):
 
-    HORIZON=50000
+    HORIZON=10000
     REPETITIONS=100
     N_JOBS=40
 
@@ -38,16 +38,16 @@ def main(args):
 
     POLICIES = [
             {
-                "archtype":OSSB,
+                "archtype":OSSB_DEL,
                 "params":{}
             },
             {
-                "archtype":LipschitzOSSB,
+                "archtype":LipschitzOSSB_DEL,
                 "params":{}
             },
-            LipschitzOSSB_true(nbArms=len(embeddings), embeddings=embeddings, gamma=0.001, L=true_LC)
+            LipschitzOSSB_DEL_true(nbArms=len(embeddings), embeddings=embeddings, gamma=0.001, L=true_LC)
             ,
-            LipschitzOSSB_true(nbArms=len(embeddings), embeddings=embeddings, gamma=0.001, L=0.1)
+            LipschitzOSSB_DEL_true(nbArms=len(embeddings), embeddings=embeddings, gamma=0.001, L=0.1)
         ]
 
     configuration = {
