@@ -1,0 +1,1 @@
+[ISIT 2021] Official implementation of [Transfer Learning in Bandits with Latent Continuity](https://ieeexplore.ieee.org/abstract/document/9518093) by Hyejin Park, Seiyun Shin, Kwang-Sung Jun, and Jungseul Ok
